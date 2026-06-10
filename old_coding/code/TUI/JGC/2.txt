@@ -1,0 +1,21 @@
+-----JGC Q10/Q20 批量刷机模式-----
+步骤2：PDCN刷入BOOTLOADER
+等待IP 192.168.123.1 上线
+
+
+
+
+
+
+-----Powered by Haku Studio （年份）-----
+
+-----JGC Q10/Q20 批量刷机模式-----
+步骤2：PDCN刷入BOOTLOADER
+192.168.123.1 上线！（这里要的是能够http过登录，ping到之后反复尝试http登录）
+自动认证 admin/admin
+执行SSH命令，下载服务端
+系统已重启
+进入下一阶段
+
+
+-----Powered by Haku Studio （年份）-----

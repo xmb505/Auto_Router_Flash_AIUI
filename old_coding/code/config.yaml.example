@@ -1,0 +1,112 @@
+# =============================================
+# 路由器刷机流水线 - 配置文件
+# =============================================
+
+# 全局设置
+global:
+  # 日志输出
+  log_enabled: true
+
+# =============================================
+# CR660X 路由器配置
+# =============================================
+cr660x:
+  # 固件存放目录
+  firmware_dir: "/opt/firmware/cr660x"
+
+  # 固件文件
+  initramfs: "sharewifi_initramfs-kernel.bin"
+  sysupgrade: "sharewifi_1.0.7.bin"
+  bootloader: "pb-boot.img"
+
+  # 旁路由 AP 配置（刷完后设置 WiFi）
+  ap_ssid: "ShareWiFi_5G"
+  ap_password: "12345678"
+
+  # 检测的 IP 地址列表（按优先级排序）
+  detect_ips:
+    - "192.168.10.1"   # JGC-Q10 默认
+    - "192.168.2.1"    # JGC-Qx 默认
+    - "192.168.31.1"   # Xiaomi 默认
+    - "192.168.1.1"    # uboot/initramfs
+
+  # 第二阶段等待的 IP
+  stage2_wait_ip: "192.168.1.1"
+
+  # 最终系统 IP
+  final_ip: "10.11.12.1"
+
+  # SSH 连接配置
+  ssh:
+    timeout: 30
+    retry_interval: 5
+    max_retries: 100
+
+  # 内存检测阈值 (KB)
+  min_memory: 248848
+
+# =============================================
+# JGC 路由器配置
+# =============================================
+jgc:
+  # 固件存放目录
+  firmware_dir: "/opt/firmware/jgc"
+
+  # 固件文件
+  pdcn_firmware: "JCG-Q20-PDCN.bin"
+  bootloader: "pb-boot.img"
+  final_firmware: "sharewifi_1.0.7.bin"
+
+  # 检测的 IP 地址
+  detect_ips:
+    official: "192.168.10.1"    # 官方固件默认 IP (Q10)
+    official_qx: "192.168.2.1"  # 官方固件默认 IP (Qx)
+    pdcn: "192.168.123.1"       # PDCN 系统 IP
+    uboot: "192.168.1.1"         # uboot IP
+    final: "10.11.12.1"          # 最终系统 IP
+
+  # chfs 文件服务器配置
+  chfs:
+    port: 8080
+    share_path: "/opt/firmware/jgc"
+    # 启动命令: chfs -port 8080 -path /opt/firmware/jgc
+
+  # PDCN 系统认证
+  pdcn_auth:
+    username: "admin"
+    password: "admin"
+
+# =============================================
+# 网络配置（Alpine LXC）
+# =============================================
+network:
+  # 各网卡对应的子网（后缀 .5 为容器 IP）
+  subnets:
+    - subnet: "192.168.1.0/24"
+      gateway: "192.168.1.5"
+      usage: "uboot 阶段"
+    - subnet: "192.168.2.0/24"
+      gateway: "192.168.2.5"
+      usage: "JGC-Qx 官方固件"
+    - subnet: "192.168.10.0/24"
+      gateway: "192.168.10.5"
+      usage: "JGC-Q10 官方固件"
+    - subnet: "192.168.31.0/24"
+      gateway: "192.168.31.5"
+      usage: "Xiaomi 默认"
+    - subnet: "192.168.123.0/24"
+      gateway: "192.168.123.5"
+      usage: "PDCN 系统"
+
+  # rp_filter 设置（必须设为 0 或 2）
+  rp_filter: 0
+
+# =============================================
+# 存货记录
+# =============================================
+inventory:
+  # MAC 地址记录文件
+  mac_file: "/opt/inventory/mac_list.txt"
+
+  # 格式：每行一个 MAC 地址
+  # 示例：aa:bb:cc:dd:ee:ff,CR660X,2026-05-11 10:30

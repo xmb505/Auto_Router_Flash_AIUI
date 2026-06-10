@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl *)",
+      "Bash(cat)",
+      "Bash(import *)",
+      "Bash(from *)",
+      "Bash(key *)",
+      "Bash(iv *)",
+      "Bash(login_nonce *)",
+      "Bash(inner *)",
+      "Bash(print)",
+      "Bash(login_pwd *)",
+      "Bash(set_nonce *)",
+      "Bash(oldpwd *)",
+      "Bash(new_admin_pwd *)",
+      "Bash(old_admin_pwd *)",
+      "Bash(aes_key_hex *)",
+      "Bash(aes_key *)",
+      "Bash(aes_key_hex)",
+      "Bash(plaintext_hex *)",
+      "Bash(plaintext *)",
+      "Bash(plaintext_hex)",
+      "Bash(iv_bytes *)",
+      "Bash(iv)",
+      "Bash(cipher *)",
+      "Bash(aes_key, *)",
+      "Bash(padded_len *)",
+      "Bash(padded *)",
+      "Bash(plaintext)",
+      "Bash(encrypted *)",
+      "Bash(padded)",
+      "Bash(encrypted_b64 *)",
+      "Bash(encrypted)",
+      "Bash(.decode)",
+      "Bash(pyeof)",
+      "Bash(python3 *)",
+      "Bash(pip3 install *)"
+    ]
+  },
+  "$version": 4
+}

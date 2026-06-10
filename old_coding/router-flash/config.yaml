@@ -1,0 +1,125 @@
+# =============================================
+# 路由器刷机流水线 - 配置文件
+# =============================================
+
+# 全局设置
+global:
+  # 日志输出
+  log_enabled: true
+
+  # Ping 间隔（秒），支持浮点数，如 0.5
+  ping_interval: 0.5
+
+# =============================================
+# CR660X 路由器配置
+# =============================================
+cr660x:
+  # 固件存放目录（相对于 src/）
+  firmware_dir: "./firmware/cr660x"
+
+  # 固件文件
+  initramfs: "sharewifi_initramfs-kernel.bin"
+  sysupgrade: "sharewifi_1.0.7.bin"
+  bootloader: "pb-boot.img"
+
+  # 命令注入辅助 Wi-Fi 配置
+  # extendwifi_connect API 让路由器连接到此热点
+  exploit_wifi:
+    ssid: "MICR6608"
+    password: "12345678"
+
+  # 检测的 IP 地址列表（按优先级排序）
+  detect_ips:
+    - "10.11.12.1"      # 最终系统（刷机完成）
+    - "192.168.1.1"     # 第二阶段 initramfs
+    - "192.168.10.1"    # 移动默认
+    - "192.168.2.1"     # 电信/联通 默认
+    - "192.168.31.1"    # 联通默认
+
+  # 第二阶段等待的 IP（initramfs）
+  stage2_wait_ip: "192.168.1.1"
+
+  # 最终系统 IP
+  final_ip: "10.11.12.1"
+
+  # SSH 连接配置
+  ssh:
+    timeout: 30
+    retry_interval: 5
+    max_retries: 100
+
+  # 内存检测阈值 (KB)
+  min_memory: 248848
+
+  # Stage 3: Uboot HTTP 上传 Kernel 配置
+  uboot_ip: "192.168.1.1"
+  uboot_kernel: "sharewifi_initramfs-kernel.bin"
+
+# =============================================
+# JGC 路由器配置
+# =============================================
+jgc:
+  # 固件存放目录（相对于 src/）
+  firmware_dir: "./firmware/jgc"
+
+  # 固件文件
+  pdcn_firmware: "JCG-Q20-PDCN.bin"
+  bootloader: "pb-boot.img"
+  final_firmware: "sharewifi_jqg_q20_1.1.bin"
+
+  # 检测的 IP 地址
+  detect_ips:
+    official: "192.168.10.1"    # 官方固件默认 IP (Q10)
+    official_qx: "192.168.2.1"  # 官方固件默认 IP (Qx)
+    pdcn: "192.168.123.1"       # PDCN 系统 IP
+    uboot: "192.168.1.1"         # uboot IP
+    final: "10.11.12.1"          # 最终系统 IP
+
+  # chfs 文件服务器配置
+  chfs:
+    ip: "192.168.123.5"       # chfs 服务器 IP（容器在 PDCN 网段的 IP）
+    port: 8080
+    binary: "./firmware/jgc/chfs-linux-amd64-3.1"  # chfs 二进制路径（相对于 src/）
+    share_path: "./firmware/jgc"                # 共享目录（相对于 src/）
+
+  # PDCN 系统认证
+  pdcn_auth:
+    username: "admin"
+    password: "admin"
+
+# =============================================
+# AX3000T 路由器配置
+# =============================================
+ax3000t:
+  # 默认 IP
+  default_ip: "192.168.31.1"
+  uboot_ip: "192.168.1.1"
+
+  # 固件目录
+  firmware_dir: "./ax3000t/firmware"
+
+  # 检测的 IP 地址
+  detect_ips:
+    - "192.168.31.1"    # 官方固件默认
+    - "192.168.1.1"     # uboot / initramfs
+
+# =============================================
+# AX3600 路由器配置
+# =============================================
+ax3600:
+  default_ip: "192.168.31.1"
+  uboot_ip: "192.168.1.1"
+  firmware_dir: "./ax3600/firmware"
+  detect_ips:
+    - "192.168.31.1"
+    - "192.168.1.1"
+
+# =============================================
+# 存货记录
+# =============================================
+inventory:
+  # MAC 地址记录文件
+  mac_file: "./firmware/mac_list.txt"
+
+  # 格式：每行一个 MAC 地址
+  # 示例：aa:bb:cc:dd:ee:ff,CR660X,2026-05-11 10:30
