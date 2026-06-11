@@ -38,10 +38,12 @@ extracted_at: '2026-06-08T04:02:13.519Z'
 │       └── ax6/       {doc/, files/}
 │
 ├── doc/                          # 项目文档
-│   └── conventions/              # 规范主题（按"按主题分多级目录"组织）
+│   └── conventions/              # 规范（按数字前缀 + 主题分文件）
 │       ├── 01-naming.md          # 命名约定
-│       ├── 02-script-contract.md # 脚本契约
-│       └── 03-unix-philosophy.md # Unix 哲学总则
+│       ├── 02-script-contract.md # 脚本契约（含 AI 友好输出）
+│       ├── 03-unix-philosophy.md # Unix 哲学总则
+│       ├── 04-utility-contract.md# 工具脚本契约
+│       └── 05-ai-interface.md   # AI 接口设计规范（--help-json / reason 分类 / troubleshooting 集成）
 │
 ├── old_coding/                   # 旧物容器（重构素材库）
 │   ├── Auto_Flash_Router/        # 旧仓库 1
@@ -78,10 +80,15 @@ extracted_at: '2026-06-08T04:02:13.519Z'
 | **stderr** | 人类可读进度 | 自由文本 |
 | **exit code** | 成功/失败 | `0` 成功 / 非 `0` 失败 |
 
-- 必须支持 `--help`（argparse）
+- 必须支持 `--help`（argparse），**必须支持 `--help-json`**（参数 JSON Schema，供 AI 自动构造命令行）
+- 成功 JSON：`{"ok": true, "step": "...", "data": {...}}`
+- 失败 JSON：`{"ok": false, "step": "...", "error": "...", "reason": "stok_expired", "recoverable": true}`  
+  — `reason` 是标准化错误分类，AI 凭此查 `troubleshooting.md`；`recoverable` 告诉 AI 能否自动重试
+- **JSON 不做导航**：`next_steps`/`recovery` 不放 JSON 里，流程编排走 `flash-pipeline.md`，排错走 `troubleshooting.md`
 - 优先网络自动探测，次选 CLI 参数，末选 stdin JSON
 - 临时文件用 `tempfile.NamedTemporaryFile`，不污染当前目录
 - 三方依赖在文件顶部 `import` 区集中声明
+- 每个机型 `doc/` 目录必须有 `flash-pipeline.md`（流程）、`troubleshooting.md`（排错）、`model-info.md`（硬件参数）
 
 ## 工作流（用户说"开始"时按顺序）
 

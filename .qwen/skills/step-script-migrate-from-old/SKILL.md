@@ -15,10 +15,12 @@ extracted_at: '2026-06-08T16:15:00.290Z'
 
 ## 前置
 
-- 已读过 `doc/conventions/02-script-contract.md`（脚本契约）
+- 已读过 `doc/conventions/02-script-contract.md`（脚本契约 — 含 AI 友好输出）
+- 已读过 `doc/conventions/05-ai-interface.md`（AI 接口设计规范）
 - 已读过 `doc/conventions/01-naming.md`（命名约定）
 - 已知道 `step-script-default-silent-debug` skill（`--debug` 模式 + 模块 `DEBUG` 全局）
 - 已知道"啥都从路由器拿"哲学（KEY/IV/SSID/固件版本一律运行时探测）
+- 已知道 **JSON 不做导航**：`next_steps` / `recovery` 不放进输出，流程编排走 `flash-pipeline.md`，排错走 `troubleshooting.md`
 
 ## 迁移流程（5 步）
 
@@ -82,13 +84,25 @@ def log(msg: str, level: str = "INFO") -> None:
 def emit_ok(data: dict) -> None:
     print(json.dumps({"ok": True, "step": STEP_NAME, "data": data}, ensure_ascii=False))
 
-def emit_err(error: str) -> None:
-    print(json.dumps({"ok": False, "step": STEP_NAME, "error": error}, ensure_ascii=False))
+def emit_err(error: str, reason: str = "unknown", recoverable: bool = False) -> None:
+    """失败输出。reason 见错误分类表，recoverable 告诉 AI 能否自动重试。"""
+    print(json.dumps({
+        "ok": False,
+        "step": STEP_NAME,
+        "error": error,
+        "reason": reason,
+        "recoverable": recoverable,
+    }, ensure_ascii=False))
 
 # argparse —— 严格遵循用户给的参数清单
 # 默认静默 + --debug 唯一 opt-in
 # 业务常用值给字面量默认（dev shortcut），不强制 required
 p.add_argument("--debug", action="store_true", help="...")
+
+# --help-json 支持（在 main() 开头处理）
+if hasattr(args, 'help_json') and args.help_json:
+    print_help_json(parser, STEP_NAME)
+    return 0
 
 # main()
 def main() -> int:
@@ -99,13 +113,44 @@ def main() -> int:
         data = business_fn(...)
     except Exception as e:
         log(str(e), level="ERROR")
-        emit_err(str(e))
+        emit_err(str(e), reason="unknown", recoverable=False)
         return 1
     emit_ok(data)
     return 0
 ```
 
 **业务函数签名**：不带 `quiet` / `debug` 参数——日志门控由模块全局 `DEBUG` 决定，不污染业务逻辑。
+
+**--help-json 实现**（在 parse_args 中加）：
+
+```python
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="...")
+    p.add_argument("--help-json", action="store_true",
+                   help="输出参数 JSON Schema（供 AI 自动构造命令行）")
+    # ... 其他参数
+    return p.parse_args()
+
+def print_help_json(parser: argparse.ArgumentParser, script_name: str) -> None:
+    """输出 --help-json 格式。"""
+    import inspect
+    args_list = []
+    for action in parser._actions:
+        if action.option_strings:
+            name = action.option_strings[0]
+            is_flag = action.nargs == 0
+            args_list.append({
+                "name": name,
+                "type": "flag" if is_flag else "string",
+                "default": action.default if action.default is not None else None,
+                "required": action.required,
+                "description": action.help or "",
+            })
+    print(json.dumps({
+        "script": script_name,
+        "args": args_list,
+    }, ensure_ascii=False))
+```
 
 ### 4. 加状态校验（按需）
 
@@ -234,6 +279,8 @@ python3 N.step.py 2>&1 | head -1
 
 每次新剥一个 step 脚本时**同时**检查：
 
-1. 该机型的 `doc/README.md` —— "步骤脚本"表里加上新行 + 简短说明
-2. `doc/conventions/02-script-contract.md` —— 如果发现新约定没记在规范里，**先改规范**再改代码
+1. 该机型的 `doc/` 目录：
+   - `flash-pipeline.md` — 更新步骤表（含新脚本在流水线中的位置）
+   - `troubleshooting.md` — 新增条目标注 `[reason]` 标识符，覆盖已知错误
+2. `doc/conventions/02-script-contract.md` — 如果发现新约定没记在规范里，**先改规范**再改代码
 3. 任何 hardcode 但应该扒的常量被遗漏 —— 重新走第 1 步
