@@ -2,13 +2,13 @@
 # set_miwifi_uboot_partition.sh — AX3600 切启动分区
 #
 # 3 个 nvram / fw_setenv flag 互补设置:
-#   --part 0 → 切到 mtd12 (rootfs / 小米 stock)
-#   --part 1 → 切到 mtd13 (rootfs_1 / OpenWrt)
+#   --part 0 → 切到 mtd12 (rootfs)
+#   --part 1 → 切到 mtd13 (rootfs_1)
 #
 # 本脚本智能检测: stock 下用 nvram, OpenWrt 下用 fw_setenv
 #
 # 用法:
-#   ./set_miwifi_uboot_partition.sh --part 0      # stock 下切到 mtd12
+#   ./set_miwifi_uboot_partition.sh --part 0      # 切到 mtd12
 #   ./set_miwifi_uboot_partition.sh --part 1      # 切到 mtd13
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

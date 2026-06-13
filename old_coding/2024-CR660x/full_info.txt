@@ -1,0 +1,153 @@
+_MTD_partitions_:
+   0 > addr: 00000000  size: 01000000  ro: 0  name: "ALL" 
+   1 > addr: 00000000  size: 00030000  ro: 0  name: "Bootloader" 
+   2 > addr: 00030000  size: 00010000  ro: 0  name: "NULL" 
+   3 > addr: 00040000  size: 00010000  ro: 0  name: "Bdata" 
+   4 > addr: 00050000  size: 00010000  ro: 0  name: "Factory" 
+   5 > addr: 00060000  size: 00010000  ro: 0  name: "crash" 
+   6 > addr: 00070000  size: 00010000  ro: 0  name: "cfg_bak" 
+   7 > addr: 00080000  size: 00100000  ro: 0  name: "overlay" 
+   8 > addr: 00180000  size: 00D00000  ro: 0  name: "OS1" 
+   9 > addr: 00350000  size: 00B30000  ro: 0  name: "rootfs" 
+  10 > addr: 00E80000  size: 00170000  ro: 0  name: "disk" 
+  11 > addr: 00FF0000  size: 00010000  ro: 0  name: "Config" 
+
+_Base_info_:
+  Linux version: 3.10.14
+  CPU arch: mips
+  CPU name: mt7621
+  SPI rom: False
+
+_Kernel_command_line_:
+  console=ttyS1,115200n8
+  uart_en=1
+  factory_mode=0
+  mem=128m
+  root=/dev/mtdblock9
+
+_NVRam_params_:
+  bootcmd=tftp
+  bootdelay=3
+  ethaddr="00:AA:BB:CC:DD:10"
+  ipaddr=192.168.31.1
+  serverip=192.168.31.100
+  restore_defaults=0
+  stdin=serial
+  stdout=serial
+  stderr=serial
+  uart_en=1
+  model=R4A
+  flag_boot_type=2
+  flag_boot_rootfs=0
+  mode=Router
+  telnet_en=0
+  wl0_ssid=Xiaomi_5G
+  wl1_ssid=Xiaomi
+  wl0_radio=1
+  wl1_radio=1
+  boot_wait=on
+  ssh_en=1
+  no_wifi_dev_times=0
+  CountryCode=CN
+  flag_ota_reboot=0
+  color=101
+  nv_wan_type=dhcp
+  flag_boot_success=1
+  flag_last_success=0
+  flag_try_sys1_failed=0
+  SN=21894/25349709
+  flag_try_sys2_failed=0
+  normal_firmware_md5=6406bb925d8d82bb67f7354ad8e29aea
+  Router_unconfigured=0
+  nv_sys_pwd=a671b7ae34ff1ad9bc001f572e0648ef47fe6e0a
+  nv_wifi_ssid=Xiaomi_99CA
+  nv_wifi_enc=mixed-psk
+  nv_wifi_pwd=12345678
+  nv_wifi_ssid1=Xiaomi_99CA_5G
+  nv_wifi_enc1=mixed-psk
+  nv_wifi_pwd1=12345678
+  flag_flash_permission=1
+  flag_show_upgrade_info=1
+
+_RootFS_current_:
+  num = None
+  mtd_num = 9
+  mtd_dev = "/dev/mtdblock9"
+  partition = "None"
+
+_Version_info_:
+  UBoot: 4.2.S.1 
+  OpenWrt: None 
+  Firmware: 2.28.503 
+  Channel: release 
+  BuildTime: Tue, 07 Feb 2023 08:35:02 +0000 
+  Hardware: R4A 
+  UBoot(2): 1.0.2 
+
+_Bootloader_info_:
+  Bootloader:
+    addr: 0x00000000 
+    size: 0x00020000 
+    image size: None bytes 
+    type: uboot 
+
+_ENV_info_:
+  Config:
+    addr: 0x00FF0000 
+    size: 0x00001000 
+    len: 820 bytes 
+    prefix: b'\x00\x0c%\xb0' 
+      bootcmd=tftp
+      bootdelay=3
+      ethaddr="00:AA:BB:CC:DD:10"
+      ipaddr=192.168.31.1
+      serverip=192.168.31.100
+      restore_defaults=0
+      stdin=serial
+      stdout=serial
+      stderr=serial
+      uart_en=1
+      model=R4A
+      flag_boot_type=2
+      flag_boot_rootfs=0
+      mode=Router
+      telnet_en=0
+      wl0_ssid=Xiaomi_5G
+      wl1_ssid=Xiaomi
+      wl0_radio=1
+      wl1_radio=1
+      boot_wait=on
+      ssh_en=1
+      no_wifi_dev_times=0
+      CountryCode=CN
+      flag_ota_reboot=0
+      color=101
+      nv_wan_type=dhcp
+      flag_boot_success=1
+      flag_last_success=0
+      flag_try_sys1_failed=0
+      SN=21894/25349709
+      flag_try_sys2_failed=0
+      normal_firmware_md5=6406bb925d8d82bb67f7354ad8e29aea
+      Router_unconfigured=0
+      nv_sys_pwd=a671b7ae34ff1ad9bc001f572e0648ef47fe6e0a
+      nv_wifi_ssid=Xiaomi_99CA
+      nv_wifi_enc=mixed-psk
+      nv_wifi_pwd=12345678
+      nv_wifi_ssid1=Xiaomi_99CA_5G
+      nv_wifi_enc1=mixed-psk
+      nv_wifi_pwd1=12345678
+      flag_flash_permission=1
+      flag_show_upgrade_info=1
+  Bdata:
+    addr: 0x00040000 
+    size: 0x00004000 
+    len: 98 bytes 
+    prefix: b'%k=\xdd' 
+      SN=21894/25349709
+      CountryCode=CN
+      model=R4A
+      color=101
+      wl0_ssid=Xiaomi_99CA_5G
+      wl1_ssid=Xiaomi_99CA
+

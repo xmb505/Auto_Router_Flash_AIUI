@@ -70,35 +70,67 @@
 
 ## 一键命令（1.0.17 工厂态）
 
+**⚠️ 重要：`1.official_init.py` 返回的 stok 初始化完成后立即失效。**
+
+原因：
+- `1.official_init.py` 用**旧密码 admin** 登录拿到 stok
+- 用 stok 调用 `set_router_normal` 把密码改成 `--admin-pwd`
+- 密码一旦修改，**旧 stok 立即失效**（小米体系的安全机制）
+- 必须**重新用新密码登录**拿新 stok
+
+**正确流程**：
+
 ```bash
 cd src/project/ax3600
 
-python3 1.official_init.py --admin-pwd 12345678 \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['stok'])" \
-  | tee /tmp/stok \
-  | xargs -I {} python3 3.enable_ssh.py --stok {} --wait
+# 步骤 1: 初始化（丢弃其返回的 stok，因改密后失效）
+python3 1.official_init.py --admin-pwd 12345678
+
+# 步骤 2: 用新密码重新登录，拿有效 stok
+STOK=$(python3 2.login_get_stok.py --pwd 12345678 | \
+  python3 -c "import sys,json; print(json.load(sys.stdin)['data']['stok'])")
+
+# 步骤 3: 用新 stok 开 SSH
+python3 3.enable_ssh.py --stok "$STOK" --wait
 
 ssh -oHostKeyAlgorithms=+ssh-rsa root@192.168.31.1   # 密码: root
 ```
 
 ## 一键命令（1.1.x 工厂态，先降级）
 
+**⚠️ 重要：`1.official_init.py` 返回的 stok 改密后立即失效。** 每次 init 后必须用 `2.login_get_stok.py` 重新拿 stok。
+
 ```bash
 cd src/project/ax3600
 
-STOK=$(python3 1.official_init.py --admin-pwd 12345678 | \
-  python3 -c "import sys,json; print(json.load(sys.stdin)['data']['stok'])")
-echo "step 1 OK, stok=$STOK"
+# 步骤 1: 1.1.x 工厂态初始化
+python3 1.official_init.py --admin-pwd 12345678
+# ⚠️ 丢弃返回的 stok（改密后失效）
 
+# 步骤 2: 用新密码重新登录，拿有效 stok
+STOK=$(python3 2.login_get_stok.py --pwd 12345678 | \
+  python3 -c "import sys,json; print(json.load(sys.stdin)['data']['stok'])")
+echo "step 1+2 OK, stok=$STOK"
+
+# 步骤 3: 降级到 1.0.17（recovery=1 清 NVRAM，~45s 重启后回到 inited=0）
 python3 4.official_upgrade.py --stok "$STOK" --file files/R3600_1.0.17.bin
-# recovery=1 清 NVRAM, ~45s 重启后回到 inited=0
 
-# 重新初始化 (1.0.17 工厂态)
-NEW_STOK=$(python3 1.official_init.py --admin-pwd 12345678 | \
+# ⚠️ 注意：recovery=1 会清 NVRAM，路由器重启后回到 inited=0
+# ⚠️ 但 STOK 是降级**前**拿的，路由器重启后该 stok 也可能失效
+# 安全做法：降级后重新 init + login
+
+sleep 60  # 等路由器重启完成
+
+# 步骤 4: 重新初始化 (1.0.17 工厂态)
+python3 1.official_init.py --admin-pwd 12345678
+# ⚠️ 丢弃返回的 stok（改密后失效）
+
+# 步骤 5: 用新密码重新登录，拿新有效 stok
+NEW_STOK=$(python3 2.login_get_stok.py --pwd 12345678 | \
   python3 -c "import sys,json; print(json.load(sys.stdin)['data']['stok'])")
-echo "step 1 again OK, new stok=$NEW_STOK"
+echo "step 4+5 OK, new stok=$NEW_STOK"
 
-# 开 SSH
+# 步骤 6: 用新 stok 开 SSH
 python3 3.enable_ssh.py --stok "$NEW_STOK" --wait
 
 ssh -oHostKeyAlgorithms=+ssh-rsa root@192.168.31.1   # 密码: root
@@ -110,7 +142,7 @@ ssh -oHostKeyAlgorithms=+ssh-rsa root@192.168.31.1   # 密码: root
 |------|------|------|------|
 | `set_config_iotdev` 返 `code:1523` | 3 | 1.1.x 已封堵 | 先步骤 4 降级到 1.0.17 |
 | `nonce 1582` | 1 | 首次 init 偶发 | 重试 2-3 次 |
-| 登录 `code 401 not auth` | 1 | 路由器已初始化 | 跳过步骤 1，先 recovery |
+| 登录 `code 401 not auth` | 1 | 路由器已初始化 | 跳过步骤 1；知道密码就直接 2.login_get_stok.py，不知道就按 Reset |
 | flash 报 `code:1532` | 4 | 固件签名不对 | 用对型号的 `.bin` (R3600 不是 RA69) |
 
 ## 验证清单

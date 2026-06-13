@@ -133,7 +133,28 @@ python3 1.official_init.py --admin-pwd <密码>
 - 固件 ≥ 1.1.x 自动加 `bw160=false` 字段（1.0.x 跳过）
 - **nonce 1582 重试**：post-recovery 首次跑可能失败，重试 2-3 次
 
-**输出**：`data.stok` 喂给下一阶段。
+**输出**：包含 stok 的 JSON。
+
+**⚠️ 关键：此 stok 改密后立即失效，不可复用给后续步骤。**
+
+原因：
+- `1.official_init.py` 用**旧密码 admin**登录拿 stok
+- 用该 stok 调用 `set_router_normal` 把密码改成 `--admin-pwd`
+- 密码一旦修改，**旧 stok 立即失效**（小米体系的安全机制）
+- 必须先跑 `2.login_get_stok.py --pwd <新密码>` 重新拿有效 stok，再喂给 `3.enable_ssh.py`
+
+**正确数据流**（不是管道链）：
+```bash
+# 步骤 1: 初始化（丢弃返回的 stok）
+python3 1.official_init.py --admin-pwd 12345678
+
+# 步骤 2: 用新密码重新登录，拿有效 stok
+STOK=$(python3 2.login_get_stok.py --pwd 12345678 | \
+  python3 -c "import sys,json; print(json.load(sys.stdin)['data']['stok'])")
+
+# 步骤 3: 用新 stok 开 SSH
+python3 3.enable_ssh.py --stok "$STOK" --wait
+```
 
 ### 阶段 2：登录拿 stok（已初始化路由器）
 

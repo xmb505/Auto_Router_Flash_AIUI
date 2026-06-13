@@ -134,6 +134,7 @@ def construct_command(script_path: str, user_knowledge: dict) -> list:
 | `ssh_failed` | SSH 连接失败 | true |
 | `mtd_write_failed` | MTD 写入失败 | false |
 | `file_not_found` | 文件缺失 | true |
+| `smartcontroller_unavailable` | smartcontroller 漏洞链路已堵死 | false |
 | `unknown` | 未分类错误 | false |
 
 ---

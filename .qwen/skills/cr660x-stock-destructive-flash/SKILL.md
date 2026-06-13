@@ -1,8 +1,8 @@
 ---
 name: cr660x-stock-destructive-flash
-description: CR660X (CR6606 联通 / CR6608 移动 / CR6609 越南) stock 固件迁移 + 破坏性刷机完整流程：JS 反推 AES-CBC newPwd → smartcontroller scene 启用 SSH → 真 SSH 验证 → scp 上传。强调"不抄 flasher.py 错误实现"、"不走辅助 WiFi 注入"、"不做双系统"
+description: CR660X (CR6606/TR606 联通 / CR6608/TR608 移动 / CR6609/TR609 电信) stock 固件迁移 + 破坏性刷机完整流程：JS 反推 AES-CBC newPwd → smartcontroller scene 启用 SSH → 真 SSH 验证 → scp 上传。强调"不抄 flasher.py 错误实现"、"不走辅助 WiFi 注入"、"不做双系统"、"CR6606 无密码路径只能物理 Reset"
 source: auto-skill
-extracted_at: '2026-06-11T11:37:31.075Z'
+extracted_at: '2026-06-12T23:55:00.000Z'
 ---
 
 # CR660X stock 固件迁移 + 破坏性刷机
@@ -88,7 +88,9 @@ get_router_info.sh           # 0  探测 init_info（无鉴权）
   ↓ 真 SSH 验证
 4.firmware_upload_on_miwifi.sh  # scp 上传 .bin/.ubi 到 /tmp
   ↓
-[未来] 5+. 烧写 + 刷 OpenWrt + 验证
+5.uboot_write_in_miwifi.py  # SSH mtd unlock /dev/mtd0 + mtd write pb-boot（不重启）
+  ↓
+6.openwrt_write_in_miwifi.py  # SSH sysupgrade -F initramfs → 路由器自动重启进 initramfs
 
 工具：
 - miwifi_ssh.sh               # 一键 SSH（交互 + JSON 命令模式）
@@ -177,8 +179,79 @@ cmdline: `console=ttyS0,115200 firmware=0 uart_en=1 rootfstype=squashfs,jffs2`
 - ❌ TCP 22 探测成功就以为 SSH 启用了（必须真 SSH 登录验证）
 - ❌ 跳过 `sed -i 's/release/XXXXXX/g' /etc/init.d/dropbear`（详见 ax6 skill）
 
+## 固件版本差异与漏洞可用性
+
+### 按固件版本分攻防矩阵（2026-06-11 实测）
+
+| 固件版本 | 机型 | smartcontroller | set_config_iotdev | c_upload+netspeed | arn_switch | 结论 |
+|----------|------|-----------------|-------------------|-------------------|------------|------|
+| 1.0.117 | CR6606 联通 | ✅ hackCheck=0 | 未测 | 未测 | 未测 | 全链路通过 |
+| 1.0.100 | CR6608 移动 | ✅ **可用**⚠️ | ❌ code:1523 | ❌ code:1629 | ❌ 假阳性 | smartcontroller 唯一通道 |
+
+### 1.0.100 实测结果（2026-06-11 验证）
+
+CR6608 1.0.100 的 smartcontroller scene 注入**确实可用**。之前误判为 `code:-100` 有两个原因：
+
+#### 1. `get_scene_setting` 失败 ≠ scene 注入不可用
+
+| API | 响应 | 含义 |
+|-----|------|------|
+| `scene_setting` | `{"code":0,"msg":"","id":1}` | ✅ 创建场景成功 |
+| `scene_start_by_crontab` | `{"code":0,"msg":""}` | ✅ 触发成功 |
+| `get_scene_setting` | `{"code":-100,"msg":"connect failed"}` | ❌ 查询功能不可用，**不影响注入** |
+
+`get_scene_setting` 是场景列表查询接口——它失败只说明 smartcontroller 的查询/管理功能坏了，但**场景创建+触发链路完全独立**，不受影响。
+
+#### 2. exec_cmd 分块注入太慢，120s 超时不够
+
+`sed` + `dropbear enable` + `dropbear restart` 三条 `exec_cmd`（分块 echo 写入 /tmp/e → chmod → sh 执行）共需 ~113 秒，再加上 TCP 探测 ~15-48 秒，总计 **~150-160 秒**。120s 超时在 `dropbear restart` 刚触发时就截断了，sed 未完整执行导致 release 锁还在，SSH 起不来。**必须给 ≥ 240s。**
+
+#### 其他 API 确实被封
+
+1. **`misystem/set_config_iotdev`** — ssid `-h` 注入返回 `{"msg":"参数错误","code":1523}`
+2. **`misystem/c_upload`** — 返回 `{"code":1629,"msg":"解压失败"}`，不接受任何内容
+3. **`misystem/arn_switch`** — 返回 `{"code":0}` 但命令不执行（假阳性）
+4. **`start_binding/set_mac_filter/datacenter7/get_netmode`** — "No page is registered"
+
+### 新增备选漏洞路径（来自 old_coding/2024-CR660x/）
+
+除了 smartcontroller（connect5），`2024-CR660x/` 还有两个备选：
+
+| 脚本 | 漏洞 | 端点 | 适用机型 |
+|------|------|------|----------|
+| `connect2.py` | `set_config_iotdev` ssid `-h\nCMD\n` | `misystem/set_config_iotdev` | R3600 v1.0.17 / R2100 v2.0.722 等旧固件 |
+| `connect6.py` | `arn_switch` level=`\nCMD\n` | `misystem/arn_switch` | RDxx/CR88xx (RD01-RD08) |
+
+**路由决策**（`connect.py`）：
+- `dn in 'RD01..CR8819 RD08'` → connect6（arn_switch）
+- `model_id <= 0 or model_id >= R2100` → connect5（smartcontroller）
+- 否则 → c_upload + netspeed 路径
+
+CR6608 不符合第一个条件，model_id 会走 connect5（但 smartcontroller 在 1.0.100 不可用）。
+
+## 漏洞验证方法论
+
+**绝对不要**只看 API 返回 `{"code":0}` 就假设命令执行了。用时间检验法：
+
+```python
+# 读当前时间
+before = requests.get(f'{apiurl}misystem/sys_time').json()['time']
+# 注入命令：改时间到 2033
+exec_cmd('date -s 203301020304')
+time.sleep(2)
+after = requests.get(f'{apiurl}misystem/sys_time').json()['time']
+# 验证
+if after['year'] == 2033:
+    print('✅ 命令确实执行了')
+else:
+    print('❌ code:0 是假阳性，命令未执行')
+```
+
+此方法适用于任何返回 `code:0` 但行为可疑的注入点。
+
 ## 参考
 
 - 实机验证日志：`src/project/cr660x/doc/flash-pipeline.md` + `doc/troubleshooting.md`
+- 备选漏洞源码：`old_coding/2024-CR660x/connect2.py` / `connect6.py` / `connect.py`
 - 项目记忆：`memory/project_cr660x_state.md` + `memory/feedback_no_aux_wifi_injection.md` + `memory/feedback_cr_no_dual_system.md` + `memory/feedback_xiaomi_ssh_scripts.md`
 - 入口：`src/project/cr660x/1.official_init.py` + `2.login_get_stok.py` + `3.enable_ssh.py` + `4.firmware_upload_on_miwifi.sh` + `miwifi_ssh.sh` + `router_official_recovery.sh`

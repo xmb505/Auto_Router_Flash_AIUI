@@ -104,10 +104,7 @@ def detect_variant(info: dict) -> str:
     model = info.get("model", "").lower()
     if "cr6606" in model:
         return "unicom"
-    if "cr6608" in model:
-        return "move"
-    if "cr6609" in model:
-        return "vn"
+    # CR6608/TR608（移动版）、CR6609/TR609（电信版）都用 move 流程（POST 登录）
     return "move"
 
 
@@ -211,7 +208,7 @@ def parse_args() -> argparse.Namespace:
             "示例:\n"
             "  # CR6606 联通版（自动探测 variant）\n"
             "  python3 2.login_get_stok.py --pwd mynewpass123\n"
-            "  # CR6608 移动/电信版\n"
+            "  # CR6608 移动版 / CR6609 电信版\n"
             "  python3 2.login_get_stok.py --ip 192.168.31.1 --pwd mynewpass123\n"
             "  # 强制 variant\n"
             "  python3 2.login_get_stok.py --variant unicom --pwd mynewpass123\n"
@@ -220,7 +217,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ip", default=DEFAULT_ROUTER_IP,
                    help=f"路由器 IP（默认: {DEFAULT_ROUTER_IP}）")
     p.add_argument("--variant", default="auto",
-                   choices=["auto", "unicom", "move", "vn"],
+                   choices=["auto", "unicom", "move"],
                    help="强制 variant（默认 auto 走 init_info 探测）")
     p.add_argument("--pwd", required=True,
                    help="路由器管理密码（必传）")

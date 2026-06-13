@@ -86,6 +86,7 @@
 | `ssh_failed` | SSH 连接失败 | true |
 | `mtd_write_failed` | MTD 写入失败 | false |
 | `file_not_found` | 文件缺失 | true |
+| `smartcontroller_unavailable` | smartcontroller 漏洞链路已堵死 | false |
 | `unknown` | 未分类错误 | false |
 
 分类表随 `doc/troubleshooting.md` 扩展。`troubleshooting.md` 按 `[reason]` 索引条目，AI 通过 `reason` 字段快速定位恢复方案。
@@ -122,7 +123,7 @@
 - 标准开关：
   - `--debug`：打印进度日志到 stderr（**默认关闭**——成功时只输出 JSON）
   - `--timeout <sec>`：网络超时（默认 30）
-  - `--router <ip>`：覆盖默认 IP（默认 192.168.1.1）
+  - `--ip <IP>`：路由器 IP（默认 `192.168.31.1` 小米 stock 固件；`192.168.1.1` OpenWrt 阶段脚本，以各脚本实际代码为准）
 
 ### --help-json 输出规范
 
@@ -168,17 +169,6 @@ $ python3 2.login_get_stok.py --help-json
 ```
 
 AI 拿到这个 JSON 后，可以直接解析参数列表、判断哪些必填、自动构造命令行。
-
-### argparse 辅助函数建议
-
-在项目中建立一个共享模块 `src/project/_help_json.py`（不含 `__init__.py`，不作为包安装），提供：
-
-```python
-def print_help_json(parser: argparse.ArgumentParser, script_name: str, ...):
-    """从 ArgumentParser 自动生成 --help-json 输出并 exit(0)"""
-```
-
-所有步骤脚本在 `main()` 开头检查 `--help-json` 并调用此函数。这样每个脚本不需要重复实现 help-json 生成逻辑。
 
 ## 输入来源优先级
 

@@ -19,10 +19,10 @@
 ```
 Auto_Router_Flash_AIUI/
 ├── QWEN.md                 # 本文件 — 项目总上下文
-├── flash.sh                # 兼容入口 → 见下文"入口迁移路径"
 │
 ├── doc/
 │   └── conventions/        # 编码规范
+│       ├── 00-coding-standards.md # 编程规范总纲（索引 + 速查）
 │       ├── 01-naming.md           # 命名约定
 │       ├── 02-script-contract.md  # 脚本契约（AI 友好 + 机器可解析）
 │       ├── 03-unix-philosophy.md  # Unix 哲学总则（含 AI 语境解读）
@@ -32,12 +32,12 @@ Auto_Router_Flash_AIUI/
 ├── src/
 │   └── project/            # 按机型组织的步骤脚本
 │       ├── cr660x/         # {doc/, files/, N.step.py...}
-│       ├── jgc-q10/
 │       ├── jgc-qx/
 │       ├── ax3000t/
 │       ├── ax3600/
 │       ├── ax5/
-│       └── ax6/
+│       ├── ax6/
+│       └── newifid2/       # Newifi D2（非小米，breed 刷机）
 │
 ├── old_coding/             # 重构素材库（不再作为运行目标）
 │   ├── Auto_Flash_Router/  # AX 系列原始工具
@@ -46,7 +46,7 @@ Auto_Router_Flash_AIUI/
 │   ├── AX5/
 │   └── AX6/
 │
-└── tmp/                    # 待清理
+└── old_code/               # 早期代码（参考用）
 ```
 
 ### old_coding/ 使用约定
@@ -62,10 +62,11 @@ Auto_Router_Flash_AIUI/
 |------|------|-----|------|------|
 | `ax3600` | 小米 AX3600 (R3600) | IPQ8071A | ARM | ✅ 完整流水线 |
 | `ax6` | 红米 AX6 (RA69) | IPQ8071A | ARM | ✅ 完整流水线 |
-| `ax5` | 红米 AX5 (RA67) | IPQ6000 | ARM | ❌ 待实现 |
-| `ax3000t` | 小米 AX3000T (RD03) | IPQ5000 | ARM | ❌ 待实现 |
-| `cr660x` | 小米 CR660X (联通定制) | MT7621 | MIPS | ❌ 待实现 |
-| `jgc-qx` | JGC Qx | MT7621 | MIPS | ❌ 待实现 |
+| `cr660x` | 小米 CR660X (联通定制) | MT7621 | MIPS | ✅ 完整流水线 |
+| `newifid2` | D-Team Newifi D2 | MT7621 | MIPS | 部分完成（breed_enter 实测通过） |
+| `ax5` | 红米 AX5 (RA67) | IPQ6000 | ARM | 骨架（含通用 SSH 脚本） |
+| `ax3000t` | 小米 AX3000T (RD03) | IPQ5000 | ARM | 骨架（含通用 SSH 脚本） |
+| `jgc-qx` | JGC Qx | MT7621 | MIPS | 骨架（含通用 SSH 脚本） |
 
 ## 关键约定
 
@@ -79,7 +80,7 @@ Auto_Router_Flash_AIUI/
 | **stderr = 进度/日志** | 仅 `--debug` 时输出，不写结果数据 |
 | **exit code** | 0=成功, 1=通用, 2=参数, 3=网络, 4=认证, 5=超时 |
 | **argparse + --help** | 每个脚本必须支持; `--help-json` 输出参数 JSON Schema |
-| **标准开关** | `--debug`, `--timeout`, `--router` |
+| **标准开关** | `--debug`, `--timeout`, `--ip` |
 | **无隐式依赖** | 优先标准库，三方库在 import 区声明 |
 
 ### AI 友好的输出
@@ -121,14 +122,13 @@ JSON 只表达执行结果和业务数据。流程编排和排错恢复走文档
 | `IV` | `64175472480004614961023454661220` |
 | 出厂密码 | `admin` |
 
-## 入口迁移路径
+## 入口迁移路径（远期规划，当前未实现）
 
 ```
-当前: flash.sh → old_coding/router-flash/main.py (Rich TUI)   [兼容保留]
-目标: flash.sh → src/orchestrator.py (AI 友好的 CLI orchestrator)
+规划: flash.sh → src/orchestrator.py (AI 友好的 CLI orchestrator)
 ```
 
-新的 entrance 是一个无状态 orchestrator，接收高层次目标（如 `--target openwrt`）后自动编排步骤流水线。详细设计见后续文档。
+> 当前 `flash.sh` 和 `src/orchestrator.py` 均未创建。未来将实现一个无状态 orchestrator，接收高层次目标（如 `--target openwrt`）后自动编排步骤流水线。近期方向是胶水脚本串联步骤。
 
 ## 开发流程
 

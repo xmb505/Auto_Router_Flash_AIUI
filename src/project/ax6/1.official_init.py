@@ -206,7 +206,7 @@ def parse_args() -> argparse.Namespace:
             "  python3 1.official_init.py --admin-pwd 12345678\n"
         ),
     )
-    p.add_argument("--router", default=DEFAULT_ROUTER_IP,
+    p.add_argument("--ip", default=DEFAULT_ROUTER_IP,
                    help=f"路由器 IP（默认: {DEFAULT_ROUTER_IP}）")
     p.add_argument("--ssid", default="",
                    help="Wi-Fi SSID（默认从路由器 init_info 抓）")
@@ -229,7 +229,7 @@ def main() -> int:
         args.wifi_pwd = args.admin_pwd
         log("未传 --wifi-pwd，默认使用 --admin-pwd")
     try:
-        data = official_init(args.router, args.ssid, args.wifi_pwd,
+        data = official_init(args.ip, args.ssid, args.wifi_pwd,
                              args.admin_pwd, args.timeout)
     except Exception as e:
         log(str(e), level="ERROR")

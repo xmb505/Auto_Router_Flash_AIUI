@@ -118,13 +118,12 @@
 - [ ] `--help` 可用？
 - [ ] `--help-json` 可用，输出正确参数 Schema？
 - [ ] stdout 输出恰好一个 JSON？
-- [ ] JSON 包含 `next_steps`（AI 做下一步决策）？
 - [ ] **默认静默**——不传 `--debug` 时 stderr 一片空白？
 - [ ] argparse 暴露 `--debug`（action="store_true"）？
 - [ ] exit code 用 0/非 0 表达成功/失败？
 - [ ] 不依赖标准库以外的库？（如依赖已声明）
 - [ ] 一句话能说清职责？
-- [ ] 失败时 JSON 包含 `error` + `reason` + `recoverable` + `recovery`？
+- [ ] 失败时 JSON 包含 `error` + `reason` + `recoverable`？
 - [ ] 能独立运行：`python3 ./N.xxx.py`？
 - [ ] 管道友好：`script.py | jq .data` 能直接拿到结果？
 - [ ] `doc/troubleshooting.md` 覆盖了本脚本的已知错误？

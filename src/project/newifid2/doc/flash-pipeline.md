@@ -25,7 +25,7 @@
 | # | 脚本 | 功能 | 前置 | 状态 |
 |---|------|------|------|------|
 | 1 | `breed_enter.py` | 广播 BREED:ABORT 中断启动进入 breed | 路由器**已断电待上电** | ✅ 实测通过 |
-| 2 | `breed_flash.py` | POST `/upload.html` 上传 + POST 轮询 `/upgrade_query.html` | breed 已激活 | ✅ 实测通过 (curl 验证) |
+| 2 | `breed_flash.py` | POST `/upload.html` 上传 + POST 轮询 `/upgrade_query.html` | breed 已激活 | 规划中（curl 手动验证过协议，脚本文件未创建） |
 | 3 | `check_state.py` | 探测当前在 OpenWrt / breed / Padavan | 无 | 规划中 |
 | 4 | `ssh_sysupgrade.py` | 通过 SSH 执行 sysupgrade | OpenWrt 已运行 | 规划中 |
 

@@ -26,8 +26,8 @@ import urllib.request
 # ============ 常量 ============
 DEFAULT_ROUTER_IP = "192.168.31.1"
 DEFAULT_TIMEOUT = 30
-SMARTCONTROLLER_TIMEOUT = 7
-SCENE_WAIT_SECONDS = 32
+SMARTCONTROLLER_TIMEOUT = 15
+SCENE_WAIT_SECONDS = 60
 SCENE_POLL_INTERVAL = 2
 SSH_PORT = 22
 ROOT_PASSWORD = "root"
@@ -317,16 +317,8 @@ def enable_ssh(base_url: str, stok: str, timeout: int) -> dict:
         try:
             exec_tiny_cmd(base_url, stok, f"date -s {SCENE_DATE_RAW}", sep)
         except Exception as e:
-            log(f"tiny_cmd 失败: {e}")
-            try:
-                set_device_systime(base_url, stok, dst, wait=False, timeout=timeout)
-            except Exception:
-                pass
-            try:
-                smartcontroller_post(base_url, stok, {"command": "reset_scenes"}, timeout=5)
-            except Exception:
-                pass
-            raise
+            log(f"tiny_cmd 失败: {e}（重试中...）")
+            continue
         dxt = get_device_systime(base_url, stok, timeout)
         if (dxt.get("year") == 2033 and dxt.get("month") == 1 and dxt.get("day") == 2
                 and dxt.get("hour") == 3 and dxt.get("min") == 4):

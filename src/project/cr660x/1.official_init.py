@@ -131,15 +131,12 @@ def http_get_raw(url: str, timeout: int) -> str:
 
 # ============ variant 判定 ============
 def detect_variant(info: dict) -> str:
-    """根据 init_info.model 判定: cr6606=unicom, cr6608=move, 其他=move 默认。"""
+    """根据 init_info.model 判定: cr6606=unicom, cr6608/cr6609=move。"""
     model = info.get("model", "").lower()
     if "cr6606" in model:
         return "unicom"
-    if "cr6608" in model:
-        return "move"
-    if "cr6609" in model:
-        return "vn"  # 越南版，按 move 流程但单独标
-    return "move"  # 默认移动版
+    # CR6608/TR608（移动版）、CR6609/TR609（电信版）都用 move 流程（POST 登录）
+    return "move"
 
 
 # ============ 工厂态登录 ============
@@ -286,7 +283,7 @@ def parse_args() -> argparse.Namespace:
             "示例:\n"
             "  # CR6606 联通版（默认探测后自动走 GET init=1）\n"
             "  python3 1.official_init.py --admin-pwd mynewpass123\n"
-            "  # CR6608 移动/电信版\n"
+            "  # CR6608 移动版 / CR6609 电信版\n"
             "  python3 1.official_init.py --ip 192.168.31.1 --admin-pwd mynewpass123\n"
             "  # 强制 variant\n"
             "  python3 1.official_init.py --variant unicom --admin-pwd mynewpass123\n"
@@ -297,7 +294,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ip", default=DEFAULT_ROUTER_IP,
                    help=f"路由器 IP（默认: {DEFAULT_ROUTER_IP}）")
     p.add_argument("--variant", default="auto",
-                   choices=["auto", "unicom", "move", "vn"],
+                   choices=["auto", "unicom", "move"],
                    help="强制 variant（默认 auto 走 init_info 探测）")
     p.add_argument("--ssid", default="",
                    help="Wi-Fi SSID（默认从 init_info.routername 拿）")

@@ -1,6 +1,6 @@
 # Auto Router Flash AIUI — 编程规范总纲
 
-> 整合自 `01-naming.md` ～ `05-ai-interface.md` 及实际代码模式。
+> 本文件是规范体系的**索引 + 速查**，详细内容见各子文档。
 > 变更历史在 git，本文只写现行规则。
 
 ---
@@ -40,185 +40,42 @@ src/project/<机型>/         # 按机型组织
 
 ## 三、命名约定
 
-### 文件与目录
+> → 详见 [`01-naming.md`](01-naming.md)
 
-| 类别 | 规则 | 示例 |
-|------|------|------|
-| 机型目录 | 小写 + 连字符 | `cr660x/`, `ax3600/`, `newifid2/` |
-| 步骤脚本 | `<数字>.<动词短语>.py` | `1.official_init.py`, `2.login_get_stok.py` |
-| 工具脚本 | 无数字前缀 | `miwifi_ssh.sh`, `get_router_info.sh`, `set_uboot_env.sh` |
-| 资源目录 | 小写复数 | `doc/`, `files/` |
-| 规范文档 | `<数字>-<主题>.md` | `01-naming.md`, `02-script-contract.md` |
+速查：
 
-**例外**：`4.firmware_upload_on_miwifi.sh` 带数字 4.——user 明确指定。
-
-### Python 标识符
-
-| 类别 | 规则 | 示例 |
-|------|------|------|
-| 函数/变量 | snake_case | `detect_router`, `is_inited` |
-| 常量 | UPPER_CASE | `KEY`, `MAX_RETRY`, `STEP_NAME` |
-| 类 | PascalCase | `RouterSession` |
-| 私有 | `_` 前缀 | `_internal_state` |
-| 模块级 DEBUG | `DEBUG` | `DEBUG = False` |
-
-### JSON 字段
-
-- 全部 `snake_case`
-- 布尔用 `is_` / `has_` 前缀：`is_inited`, `has_ssh`
-- 状态枚举用名词：`"ok"`, `"fail"`, `"pending"`
-- 不用简写（`password` not `pwd`），除非行业约定（`stok`, `nonce`）
-- 路由器 IP 字段统一叫 `ip`（不是 `router_ip` / `host` / `address`）
-
-### 严禁
-
-- ❌ 拼音、驼峰命名（在 Python/JSON 中）
-- ❌ 单字母变量（循环索引除外）
-- ❌ 数字后缀区分变量（用列表/字典）
+- **步骤脚本**: `<数字>.<动词短语>.py`，工具脚本多数无数字前缀
+- **Python**: snake_case 函数/变量，UPPER_CASE 常量，PascalCase 类
+- **JSON**: snake_case，布尔 `is_`/`has_` 前缀，IP 字段统一叫 `ip`
+- **严禁**: 拼音、驼峰、单字母变量（循环索引除外）
 
 ---
 
 ## 四、步骤脚本契约（`N.step.py`）
 
-### 4.1 通信三件套
+> → 详见 [`02-script-contract.md`](02-script-contract.md)
 
-| 通道 | 用途 | 规则 |
-|------|------|------|
-| **stdout** | 机器可读结果 | 恰好一个 JSON 对象，末尾换行 |
-| **stderr** | 进度日志 | 默认空白；`--debug` 开启 |
-| **exit code** | 成功/失败 | 0=成功, 1=通用, 2=参数, 3=网络, 4=认证, 5=超时 |
+速查：
 
-### 4.2 成功输出
-
-```json
-{
-  "ok": true,
-  "step": "login_get_stok",
-  "data": { ... }
-}
-```
-
-| 字段 | 必选 | 说明 |
-|------|------|------|
-| `ok` | ✅ | `true` |
-| `step` | ✅ | 步骤名，与文件名 `.step` 部分一致 |
-| `data` | ✅ | 业务数据，字段自描述 |
-| `duration_ms` | 可选 | 执行耗时 |
-
-### 4.3 失败输出
-
-```json
-{
-  "ok": false,
-  "step": "enable_ssh",
-  "error": "smartcontroller 链路在 32 秒内未激活",
-  "reason": "smartcontroller_unavailable",
-  "recoverable": true
-}
-```
-
-| 字段 | 必选 | 说明 |
-|------|------|------|
-| `ok` | ✅ | `false` |
-| `step` | ✅ | 步骤名 |
-| `error` | ✅ | 人类可读，含上下文（HTTP 状态码、API 返回等） |
-| `reason` | 推荐 | 标准化分类标识，AI 用此查 `troubleshooting.md` |
-| `recoverable` | 推荐 | AI 能否自动恢复 |
-
-### 4.4 错误分类（`reason` 枚举）
-
-| reason | 含义 | recoverable |
-|--------|------|-------------|
-| `stok_expired` | stok 过期 | true |
-| `not_inited` | 未初始化 | true |
-| `already_inited` | 已初始化 | true |
-| `network_unreachable` | 网络不通 | true |
-| `auth_failed` | 密码错误 | true |
-| `firmware_rejected` | 固件被拒 | false |
-| `ssh_failed` | SSH 不通 | true |
-| `mtd_write_failed` | MTD 写入失败 | false |
-| `file_not_found` | 文件缺失 | true |
-| `smartcontroller_unavailable` | 漏洞链路堵死 | false |
-| `unknown` | 未分类 | false |
-
-### 4.5 参数约定
-
-- 全部走 `argparse`
-- **必须**支持 `--help` 和 `--help-json`
-- **标准开关**：
-
-| Flag | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `--ip` | str | `192.168.31.1` | 路由器 IP |
-| `--timeout` | int | `30` | 网络超时秒 |
-| `--debug` | flag | False | 打印进度到 stderr |
-
+- **stdout** = 单个 JSON `{"ok": bool, "step": ..., "data"|"error": ...}`
+- **stderr** = 默认空白，`--debug` 时打印进度
+- **exit code** = 0 成功 / 1 通用 / 2 参数 / 3 网络 / 4 认证 / 5 超时
+- **标准开关**: `--ip`, `--timeout`, `--debug`
+- 必须支持 `--help` 和 `--help-json`
 - 输入来源优先级：网络自动探测 > 命令行参数 > stdin JSON
-
-### 4.6 `--help-json` 输出规范
-
-必须输出的 JSON Schema：
-
-```json
-{
-  "script": "enable_ssh",
-  "description": "CR660X 步骤 3：启用 SSH（smartcontroller 漏洞 CVE-2023-26319）",
-  "args": [
-    {
-      "name": "--ip",
-      "type": "string",
-      "default": "192.168.31.1",
-      "required": false,
-      "description": "路由器 IP"
-    },
-    {
-      "name": "--debug",
-      "type": "flag",
-      "default": false,
-      "required": false,
-      "description": "打印进度日志到 stderr"
-    }
-  ],
-  "examples": [
-    "python3 3.enable_ssh.py --stok <stok>"
-  ],
-  "stdin_contract": {
-    "expects": "上游 JSON（含 data.stok）",
-    "produces": "含 ssh_port 的成功 JSON"
-  }
-}
-```
 
 ---
 
 ## 五、工具脚本契约（`.sh`）
 
-### 5.1 通用开关（所有工具脚本必有）
+> → 详见 [`04-utility-contract.md`](04-utility-contract.md)
 
-| Flag | 默认 | 说明 |
-|------|------|------|
-| `--ip <IP>` | `192.168.31.1` | 路由器 IP |
-| `--ssh-pwd <PWD>` | `root` | SSH root 密码（dev shortcut） |
-| `--debug` | 关 | 保留 stderr |
-| `-h, --help` | — | 从脚本头注释提取 |
+速查：
 
-### 5.2 输出
-
-- **成功**：`{"ok": true, "ip": "192.168.31.1", ...业务字段}`
-- **失败**：`{"ok": false, "ip": "192.168.31.1", "error": "..."}`
-- `ip` 字段**必含**（失败时也回，让调用方能定位）
-- stderr 默认空白，`--debug` 时全量保留
-
-### 5.3 SSH 复用
-
-**所有工具脚本的 SSH 连接必须通过 `miwifi_ssh.sh`**：
-
-```bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"$SCRIPT_DIR/miwifi_ssh.sh" --ip "$ip" --pwd "$ssh_pwd" --cmd 'command'
-```
-
-例外：`4.firmware_upload_on_miwifi.sh` 用 scp（不走 SSH），`miwifi_ssh.sh` 自己是底层。
+- **通用开关**: `--ip`（默认 `192.168.31.1`）、`--ssh-pwd`（默认 `root`）、`--debug`、`-h`
+- **输出**: `{"ok": true, "ip": "..."}` / `{"ok": false, "ip": "...", "error": "..."}`
+- `ip` 字段必含（失败时也回），stderr 默认空白
+- **SSH 复用**: 所有工具脚本的 SSH 连接必须通过 `miwifi_ssh.sh`（例外：scp 脚本、miwifi_ssh 自己）
 
 ---
 
@@ -396,30 +253,14 @@ done
 
 ## 八、AI 接口集成
 
-### 8.1 AI 与脚本的交互方式
+> → 详见 [`05-ai-interface.md`](05-ai-interface.md)
 
-1. **参数发现**：`python3 N.xxx.py --help-json` → 获取参数 Schema → 补全参数 → 调用
-2. **输出解析**：stdout 拿 JSON → 判 `ok` → 提取 `data`
-3. **排错**：`ok:false` → 读 `reason` → 查 `doc/troubleshooting.md` 找恢复步骤
+速查：
 
-### 8.2 troubleshooting.md 格式约定
-
-```markdown
-## [stok_expired] STOK 令牌过期
-
-**现象**：调用 /api/misystem/set_config_iotdev 返回 HTTP 401
-
-**原因**：stok 有效期约 30 分钟
-
-**恢复步骤**：
-1. 重新运行 2.login_get_stok.py 获取新 stok
-2. 用新 stok 重试失败步骤
-
-**recoverable**：true
-**相关脚本**：login_get_stok, enable_ssh
-```
-
-AI 通过 `[reason]` 标题定位，读取恢复步骤后执行。
+- **参数发现**: `--help-json` 输出参数 Schema，AI 自动构造命令行
+- **输出解析**: stdout 拿 JSON → 判 `ok` → 提取 `data`
+- **排错**: `ok:false` → 读 `reason` → 查 `doc/troubleshooting.md` 找恢复步骤
+- `troubleshooting.md` 按 `[reason]` 标题索引，每条含现象/原因/恢复步骤/recoverable/相关脚本
 
 ---
 

@@ -291,7 +291,7 @@ ssh root@192.168.1.1 "ls /overlay/upper/"
 
 ### ⚠️ mtd1 panic 现象
 
-如果**老** mtd12 **已坏**——boot 时先加载 mtd1 小米 4.14 kernel → 挂 mtd12 panic → 回退 mtd13 OpenWrt。浪费 ~30s 但最终能进 OpenWrt。要消除：刷一份**好的** mtd12（原厂或 OpenWrt 双系统）。
+如果**老** mtd12 **已坏**——boot 时先加载 mtd1 小米 4.14 kernel → 挂 mtd12 panic → 回退 mtd13。浪费 ~30s 但最终能进对侧系统。要消除：刷一份**好的** mtd12（原厂或 OpenWrt 双系统）。
 
 ---
 
@@ -351,7 +351,7 @@ python3 6.miwifi_2_openwrt.py --file-name immortalwrt-25.12.0-xxx.ubi --part 1
 |--------|------|------|------|
 | 阶段 0 轮询超时 | init_info 永远拿不到 | 路由器没在 192.168.31.1 网段 | 检查网线/电脑 IP |
 | 阶段 1 `set_router_normal` 报 `nonce 1582` | init 失败，error 含 `workmode: 0, code: 1582` | 路由器的 nonce 历史被前 3 步污染，首次连接偶发 | **重试 2-3 次**；串联脚本必须内置重试（等待 1-2s 再试）|
-| 阶段 1 报 `code 401 not auth` | init 失败 | 路由器**已经**初始化 | 跳过阶段 1，或先 recovery |
+| 阶段 1 报 `code 401 not auth` | init 失败 | 路由器**已经**初始化 | 跳过阶段 1；知道密码就直接 2.login_get_stok.py，不知道密码就按 Reset |
 | 阶段 2 报 `登录失败` | 拿不到 stok | 密码不对 | 用 `2.login_get_stok.py --pwd admin` 试出厂默认 |
 | 阶段 3 跑完 SSH 拒接 | port 22 closed | dropbear 没起来 | 看 `3.enable_ssh.py --debug` 的 sed 步骤 |
 | 阶段 4 报 `无法连接路由器` | set_uboot_env 失败 | **SSH 没开** | 必须先跑阶段 3 enable_ssh |

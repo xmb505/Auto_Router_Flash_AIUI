@@ -1,0 +1,14 @@
+
+0=0|nand|0x400|0|90:0|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+1=524288|nand|0x400|0|90:2|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+2=786432|nand|0x0|0|90:4|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+3=1048576|nand|0x0|0|90:6|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+4=1572864|nand|0x400|0|90:8|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+5=1835008|nand|0x400|0|90:10|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+6=2097152|nand|0x400|0|90:12|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+7=2097152|nand|0x400|0|90:14|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+8=5505024|nand|0x400|0|90:16|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+9=18874368|nand|0x400|0|90:18|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+10=33554432|nand|0x400|0|90:20|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+11=65011712|nand|0x400|0|90:22|/sys/devices/platform/1e000000.palmbus/1e003000.nand|
+12=117440512|nand|0x0|0|90:24|/sys/devices/platform/1e000000.palmbus/1e003000.nand|

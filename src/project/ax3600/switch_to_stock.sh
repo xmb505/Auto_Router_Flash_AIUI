@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# switch_to_stock.sh — OpenWrt → 小米 stock (AX3600)
+# switch_to_stock.sh — 切到对侧分区 (AX3600)
 #
-# OpenWrt 下用 fw_setenv 写 uboot env flag 切到 mtd12 (rootfs / stock).
+# OpenWrt 下用 fw_setenv 写 uboot env flag 切到 mtd12 (rootfs).
 # 3 个 flag 互补设置 + reboot, 与 6.miwifi_2_openwrt.py 的切 flag 逻辑一致.
+# 注意：不假定 mtd12 是原厂，仅切启动 flag。
 #
 # 使用:
 #   ./switch_to_stock.sh                      # 默认 192.168.1.1
@@ -17,7 +18,7 @@ while [[ $# -gt 0 ]]; do
     --ip) IP="$2"; shift 2 ;;
     -h|--help)
       echo "用法: $(basename "$0") [--ip <路由器IP>]"
-      echo "OpenWrt 上通过 fw_setenv 3 个 flag 切到 mtd12 (stock)"
+      echo "OpenWrt 上通过 fw_setenv 3 个 flag 切到 mtd12"
       exit 0 ;;
     *) echo "未知参数: $1"; exit 2 ;;
   esac
@@ -32,7 +33,7 @@ OUTPUT=$(sshpass -p "" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/de
      reboot" 2>&1)
 
 if echo "$OUTPUT" | grep -q "FLAGS_OK"; then
-  echo '{"ok":true,"ip":"'"${IP}"'","action":"switch_to_stock (mtd13→mtd12)","next_ip":"192.168.31.1"}'
+  echo '{"ok":true,"ip":"'"${IP}"'","action":"switch_to_mtd12","next_ip":"192.168.31.1（如对侧是 stock）"}'
   exit 0
 else
   echo '{"ok":false,"ip":"'"${IP}"'","action":"switch_to_stock","error":"'"${OUTPUT}"'"}'

@@ -4,7 +4,7 @@
 
 **现象**：登录返回 `code != 0`，或者拿不到 stok
 
-**原因**：联通版 (`xiaomi.router.cr6606`) 和移动/电信版 (`xiaomi.router.cr6608`) 登录参数不同：
+**原因**：联通版 (`xiaomi.router.cr6606`) 和移动/电信版 (`xiaomi.router.cr6608` / `xiaomi.router.cr6609`) 登录参数不同：
 - 联通版：`GET /login?init=1&privacy=1&...`，密码 `admin`
 - 移动版：`POST /login` form-urlencoded，密码 `admin`
 

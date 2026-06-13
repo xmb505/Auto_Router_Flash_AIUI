@@ -46,8 +46,9 @@
 
 ```
 1.0.17 工厂态
-  ├── 步骤 1: 1.official_init.py            ← 初始设置密码拿 stok
-  ├── 步骤 2: 2.login_get_stok.py
+  ├── 步骤 1: 1.official_init.py            ← 初始化设置密码
+  │   ⚠️ 返回的 stok 改密后立即失效，丢弃
+  ├── 步骤 2: 2.login_get_stok.py           ← 用新密码重新登录拿有效 stok
   ├── 步骤 3: 3.enable_ssh.py  ✅           ← 注入开 SSH (root/root)
   └── (可选) 步骤 4: 4.official_upgrade.py  ← 刷 LibWrt .ubi
 ```
@@ -56,10 +57,12 @@
 1.1.x 工厂态 (set_config_iotdev 已封堵)
   ├── 步骤 4: 4.official_upgrade.py  ← 先降级到 1.0.17
   │   ⚠️ recovery=1 清 NVRAM, 路由器回到工厂态
-  ├── 步骤 1: 1.official_init.py           ← 重新初始化
-  ├── 步骤 2: 2.login_get_stok.py
+  ├── 步骤 1: 1.official_init.py           ← 重新初始化（stok 立即失效）
+  ├── 步骤 2: 2.login_get_stok.py           ← 用新密码重新登录拿新 stok
   └── 步骤 3: 3.enable_ssh.py  ✅
 ```
+
+**⚠️ 关键提醒**：`1.official_init.py` 用旧密码 admin 登录拿 stok，改密后该 stok 立即失效。每次 init 后**必须**用 `2.login_get_stok.py` 重新登录拿新 stok。
 
 实测验证：`26677/E0P534252` (1.1.25 → 1.0.17 → init → SSH 注入成功)
 
@@ -184,14 +187,14 @@ STOK=$(python3 2.login_get_stok.py --pwd 12345678 | python3 -c \
 
 详见 [`recovery.md`](recovery.md)。
 
-### `switch_to_stock.sh` — OpenWrt → 小米 stock
+### `switch_to_stock.sh` — 切到对侧分区
 
-LibWrt 上切回 mtd12 的原厂固件，无文件上传，仅 3 组 `fw_setenv` + reboot：
+从当前系统切到对侧分区，无文件上传，仅 3 组 `fw_setenv` + reboot：
 
 ```bash
 ./switch_to_stock.sh                           # 默认 192.168.1.1
 ./switch_to_stock.sh --ip 192.168.1.1
-# 重启后 192.168.31.1 stock 上线
+# 重启后 IP 变到对侧分区所在系统
 ```
 
 ### `set_miwifi_uboot_partition.sh` — 切启动分区
@@ -199,8 +202,8 @@ LibWrt 上切回 mtd12 的原厂固件，无文件上传，仅 3 组 `fw_setenv`
 3 个互补 nvram flag，决定下次启动从哪个 mtd 走：
 
 ```bash
-./set_miwifi_uboot_partition.sh --part 0       # 切到 mtd12 (stock)
-./set_miwifi_uboot_partition.sh --part 1       # 切到 mtd13 (LibWrt)
+./set_miwifi_uboot_partition.sh --part 0       # 切到 mtd12 (rootfs)
+./set_miwifi_uboot_partition.sh --part 1       # 切到 mtd13 (rootfs_1)
 ```
 
 ### `set_uboot_env.sh` — 批量设 nvram flags
