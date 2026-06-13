@@ -35,20 +35,10 @@ paste.txt
 # 临时目录
 tmp/
 
-# ===== 旧代码库 (重构素材库) =====
-# venv 和解包/合并/解包产物不入仓；固件二进制保留作为重构参考
-old_coding/**/venv/
-old_coding/**/__pycache__/
-old_coding/AX5/
-old_coding/AX6/
-old_coding/**/extracted/
-old_coding/**/unpacked/
-old_coding/**/merge_work/
-old_coding/**/squashfs-root/
-old_coding/**/firmware_extracted/
-old_coding/**/jeff_out/
-old_coding/**/rootfs_overlay/
-old_coding/**/rootfs_data_out/
+# ===== old 系列（重构素材库 / 早期代码，不入仓）=====
+old_code/
+old_coding/
+
 # 原始闪存转储 (>100MB，GitHub 拒绝 + 代码不该这么大)
 **/nand_ubi.img
 # mtd12 已成过去式
