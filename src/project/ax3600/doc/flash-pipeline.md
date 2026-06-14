@@ -1,5 +1,14 @@
 # AX3600 刷机完整流水线 (Flash Pipeline)
 
+## 快速入口
+
+```bash
+# 编辑 INI → 直接跑
+$EDITOR all_official_2_openwrt.ini
+python3 all_official_2_openwrt.py
+python3 all_official_2_openwrt.py --debug
+```
+
 ## 概述
 
 从工厂态到能 SSH 进路由器 / 刷入 OpenWrt 的**端到端**流程。

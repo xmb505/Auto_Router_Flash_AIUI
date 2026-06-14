@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 
 STEP_NAME = "breed_enter"
 DEFAULT_TIMEOUT = 180
-BROADCAST_INTERVAL = 0.5
+BROADCAST_INTERVAL = 0.05
 ABORT_PAYLOAD = b"BREED:ABORT"
 ABORTED_PAYLOAD = b"BREED:ABORTED"
 BREED_PORT = 37541
@@ -111,16 +111,25 @@ def breed_enter(timeout: int, open_browser: bool,
 
     try:
         while True:
-            attempts += 1
-            sock.sendto(ABORT_PAYLOAD, ("255.255.255.255", BREED_PORT))
+            # 批量发送多个广播包，提高命中率
+            for _ in range(5):
+                try:
+                    sock.sendto(ABORT_PAYLOAD, ("255.255.255.255", BREED_PORT))
+                    attempts += 1
+                except BlockingIOError:
+                    pass
 
+            # 检查是否有响应
             try:
                 data, addr = sock.recvfrom(64)
-                if ABORTED_PAYLOAD in data:
+                if data.strip() == ABORTED_PAYLOAD:
                     elapsed = round(time.time() - start, 2)
                     log(f"收到 BREED:ABORTED from {addr[0]}:{addr[1]}")
                     if open_browser:
-                        webbrowser.open(BREED_WEB)
+                        try:
+                            webbrowser.open(BREED_WEB)
+                        except Exception as e:
+                            log(f"无法打开浏览器: {e}", level="WARN")
                     return ({
                         "router_ip": BREED_WEB.replace("http://", ""),
                         "attempts": attempts,
@@ -134,7 +143,7 @@ def breed_enter(timeout: int, open_browser: bool,
                 return ({
                     "attempts": attempts,
                     "elapsed_sec": elapsed,
-                }, 1)
+                }, 3)
 
             time.sleep(BROADCAST_INTERVAL)
     finally:

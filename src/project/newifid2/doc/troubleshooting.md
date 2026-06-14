@@ -20,13 +20,13 @@
 **原因**：
 - 路由器未在 180s 内通电（用户忘了插电）
 - 网卡绑定错接口（广播没到路由器）
-- 路由器**已**在 OpenWrt/Padavan 运行（breed 阶段早已过去）
+- 路由器**已**在 OpenWrt 运行（breed 阶段早已过去）
 - 路由器上安装的不是 breed（是官方 uboot）
 
-**实测参考**：正常进入 breed 的响应时间约 **21s**（43 次 × 500ms），所以 180s 默认超时留足 8 倍余量。
+**实测参考**：180s 默认超时留足余量。
 
 **恢复步骤**：
-1. 路由器断电 → 重新跑 `breed_enter.py` → 看到 "监听 :37540" 输出 → **再**插电
+1. 路由器断电 → 重新跑 `breed_enter.py` → **再**插电
 2. 用 `--iface` 显式绑定到路由器所在网口
 3. 用 `curl http://192.168.1.1/` 验证是否能进 breed Web（通了说明成功了）
 4. 如果 curl 不通，按 reset 重来
@@ -49,7 +49,7 @@
 3. 用 `--open-browser` 让脚本收到响应后自动开浏览器
 
 **recoverable**：true
-**相关脚本**：breed_enter, breed_flash
+**相关脚本**：breed_enter, 5.breed_flash_firmware
 
 ## [wrong_iface] 广播从错误的网卡发出
 
@@ -79,7 +79,7 @@
 2. 在 initramfs shell 里 `scp` 上传 squashfs-sysupgrade.bin
 3. 跑 `sysupgrade -n <file>` → 写持久 rootfs + 自动重启
 
-**recoverable**：true（用 initramfs 走 sysupgrade 流程）
+**recoverable**：true
 
 ## [query_should_be_post] 用了 GET /upgrade_query.html 看不到自动重启
 
@@ -96,7 +96,7 @@
 3. 检测成功信号：Server header 消失 + `/cgi-bin/luci` 返回 403
 
 **recoverable**：true
-**相关脚本**：breed_flash
+**相关脚本**：5.breed_flash_firmware
 
 ## [stale_magic] reboot POST 用了写死的 magic 值
 
@@ -119,7 +119,7 @@
    ```
 
 **recoverable**：true
-**相关脚本**：breed_flash
+**相关脚本**：5.breed_flash_firmware
 
 ## [ssh_refused] SSH 连接被拒
 
@@ -127,8 +127,7 @@
 
 **原因**：
 - OpenWrt 未启动 dropbear（首次启动需时间）
-- Padavan 默认不开 SSH（需在 Web 开启）
-- 路由器不在 OpenWrt/Padavan 状态（可能砖了）
+- 路由器不在 OpenWrt 状态（可能砖了）
 
 **恢复步骤**：
 1. 确认路由器供电正常、启动完毕（等待 2 分钟）
@@ -137,7 +136,7 @@
 4. 如果 breed 也进不去，考虑编程器恢复
 
 **recoverable**：true
-**相关脚本**：check_state, ssh_sysupgrade, ssh_mtd_write
+**相关脚本**：6.openwrt_sysupgrade
 
 ## [sysupgrade_failed] sysupgrade 失败
 
@@ -154,7 +153,7 @@
 3. 检查 `/tmp/` 空间：`df -h /tmp`
 
 **recoverable**：true
-**相关脚本**：ssh_sysupgrade, breed_flash
+**相关脚本**：6.openwrt_sysupgrade
 
 ## [breed_upload_fail] Breed Web 上传失败
 
@@ -171,7 +170,78 @@
 3. 尝试换个浏览器
 
 **recoverable**：true
-**相关脚本**：breed_flash
+**相关脚本**：5.breed_flash_firmware
+
+## [already_inited] 路由器已初始化，无需运行 init
+
+**现象**：`1.lecco_init.py` 报错：`路由器已初始化 (guide_status=1)，不需要 init`
+
+**原因**：路由器已完成初始设置（已设置管理密码），不能再走 init 流程。
+
+**恢复步骤**：
+1. 直接运行 `2.login_get_sid.py --pwd <密码>` 拿 sid
+2. 不需要也不需要运行 `1.lecco_init.py`
+
+**recoverable**：false（操作已无意义）
+**相关脚本**：1.lecco_init, check_init
+
+## [init_sid_stale] Init 脚本返回的 sid 不可用于后续操作
+
+**现象**：`1.lecco_init.py` 返回了 sid，但用此 sid 调用管理 API 失败。
+
+**原因**：init 脚本登录时用的是**旧密码**（出厂默认密码），设置新密码后旧密码会话失效。init 返回的 sid 仅供确认 init 完成，不可用于后续操作。
+
+**恢复步骤**：
+1. 用新密码重新登录：`python3 2.login_get_sid.py --pwd <新密码>`
+2. 用新 sid 执行后续操作
+
+**recoverable**：true
+**相关脚本**：1.lecco_init, 2.login_get_sid
+
+## [sid_expired] ubus_rpc_session 过期
+
+**现象**：用 sid 调用 API 返回 `Access denied` 或 code=-32002
+
+**原因**：`ubus_rpc_session` 有效期 300 秒（5 分钟），超时后自动失效。
+
+**恢复步骤**：
+1. 重新登录：`python3 2.login_get_sid.py --pwd <密码>`
+2. 使用新 sid
+
+**recoverable**：true
+**相关脚本**：2.login_get_sid
+
+## [session_destroyed] 执行恢复出厂后 sid 失效
+
+**现象**：调用 `router_lecoo_recovery.py` 成功后，再用旧 sid 调用任何 API 都失败。
+
+**原因**：恢复出厂设置（`xapi.basic.reset_start`）会销毁所有 session、重置路由器。这是预期行为。路由器会重启，IP 恢复默认，密码恢复出厂。
+
+**恢复步骤**：
+1. 等待路由器重启（约 60s）
+2. `python3 check_init.py` 确认 `is_inited=false`
+3. `python3 1.lecco_init.py --pwd <新密码>` 重新初始化
+4. `python3 2.login_get_sid.py --pwd <新密码>` 拿新 sid
+
+**recoverable**：true
+**相关脚本**：router_lecoo_recovery, check_init, 1.lecco_init
+
+## [network_unreachable] 路由器 HTTP 不可达
+
+**现象**：所有脚本报 `连接失败` 或超时
+
+**原因**：
+- 路由器正在重启（恢复出厂/升级固件后）
+- 路由器不在同一子网
+- 网线断开
+
+**恢复步骤**：
+1. `ping 192.168.99.1` 检查可达性
+2. 如果是刚恢复出厂，等待 60-90s 重启完成
+3. 确认本机 IP 在 192.168.99.x/24 子网
+
+**recoverable**：true
+**相关脚本**：所有脚本
 
 ## [partition_full] Flash 空间不足
 

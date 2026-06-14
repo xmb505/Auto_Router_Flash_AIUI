@@ -1,180 +1,207 @@
-# Newifi D2 — 刷机流水线
+# Newifi D2（新路由3）— 刷机流水线
 
-> Newifi D2 (MT7621) 不是小米路由器，没有 Xiaomi 加密/API 体系。刷机方式取决于当前运行状态。
+> MT7621A / 512MB DDR3 / 32MB SPI NOR Flash
 
-## 状态机
+## 流水线一览
 
 ```
-新路由器 (无系统 / breed 模式)
-    → breed Web (192.168.1.1) 上传固件
-    → 刷机完成
-
-已运行 OpenWrt (SSH 可连)
-    → SSH 上传 sysupgrade 固件
-    → sysupgrade 刷写
-    → 刷机完成
-
-已运行 Padavan
-    → SSH 上传固件
-    → mtd_write 刷 firmware 分区
-    → 刷机完成
+状态检测 → 开SSH → 注入breed → breed刷initramfs → sysupgrade
 ```
+
+## 一键编排
+
+> 子脚本本来就能独立跑，编排脚本就是把现有脚本串起来、传参数、拿 JSON 结果。
+
+| 场景 | 脚本 | 子流程 | 需要 sudo |
+|------|------|--------|----------|
+| **stock → OpenWrt 端到端** | `all_official_2_openwrt.py` | `all_official_2_breed` → `all_breed_auto_flash` | ✅（breed 探测） |
+| stock → breed 注入 | `all_official_2_breed.py` | `check_init` → `login_get_sid` → `ssh_enable` → `breed_inject` | ❌ |
+| breed → OpenWrt | `all_breed_auto_flash.py` + `all_breed_auto_flash.ini` | `breed_enter` → `breed_flash` → `ping/ssh/sysupgrade` | ✅（breed 探测） |
+
+### 端到端一键刷机
+
+```bash
+# 1. 填 INI（固件名 + 网卡）
+$EDITOR all_breed_auto_flash.ini
+
+# 2. 断电待上电，然后运行
+sudo python3 all_official_2_openwrt.py --debug
+```
+
+CLI 参数：
+
+| 脚本 | 参数 | 说明 |
+|------|------|------|
+| `all_official_2_openwrt.py` | `--pwd <密码>` | 路由器管理密码（不传 → check_init 探测，默认 admin）|
+| | `--config <ini>` | `all_breed_auto_flash.ini` 路径（默认同目录）|
+| | `--debug` | 透传子脚本，打印进度到 stderr |
+| `all_official_2_breed.py` | `--pwd <密码>` | 同上 |
+| | `--debug` | 透传子脚本 |
+| `all_breed_auto_flash.py` | `--config <ini>` | INI 路径（默认同目录）|
+| | `--debug` | 透传子脚本 |
+
+### INI 配置示例
+
+```ini
+[network]
+iface = enp1s0
+
+[firmware]
+initramfs_file = files/immortalwrt-25.12.0-ramips-mt7621-d-team_newifi-d2-initramfs-kernel.bin
+sysupgrade_file = files/immortalwrt-ramips-mt7621-d-team_newifi-d2-squashfs-sysupgrade.bin
+
+[ssh]
+password =
+```
+
+> 全部架构约束：subprocess 调用子脚本、解析 JSON stdout、不做 import。
 
 ## 步骤脚本
 
-| # | 脚本 | 功能 | 前置 | 状态 |
-|---|------|------|------|------|
-| 1 | `breed_enter.py` | 广播 BREED:ABORT 中断启动进入 breed | 路由器**已断电待上电** | ✅ 实测通过 |
-| 2 | `breed_flash.py` | POST `/upload.html` 上传 + POST 轮询 `/upgrade_query.html` | breed 已激活 | 规划中（curl 手动验证过协议，脚本文件未创建） |
-| 3 | `check_state.py` | 探测当前在 OpenWrt / breed / Padavan | 无 | 规划中 |
-| 4 | `ssh_sysupgrade.py` | 通过 SSH 执行 sysupgrade | OpenWrt 已运行 | 规划中 |
+| # | 脚本 | 功能 | 前置 | 实机验证 |
+|---|------|------|------|---------|
+| — | `check_init.py` | 探测 guide_status（无需密码） | HTTP 可达 | ✅ |
+| 2 | `2.login_get_sid.py` | 登录获取 ubus_rpc_session | 已初始化 + 密码 | ✅ |
+| 3 | `3.ssh_enable.py` | 调用 xapi.basic.open_dropbear 开启 SSH | sid | ✅ |
+| 4 | `4.breed_inject.py` | SCP 上传 .ko + insmod 自动写 breed | SSH 已开 + 密码 | ✅ |
+| 5 | `5.breed_flash_firmware.py` | breed Web 上传 + 刷写 initramfs | breed 模式 | ✅ |
+| — | `breed_enter.py` | UDP BREED:ABORT 中断进 breed | 已断电待上电 | ✅ |
+| — | `router_lecoo_recovery.py` | 恢复出厂设置 | sid | ✅ |
+| — | `openwrt_modern_standard_ssh.sh` | SSH 连接辅助 | OpenWrt 已运行 | ✅ |
 
-## 决策树
+辅助脚本：
 
-```
-                        [路由器状态?]
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-           breed           OpenWrt          Padavan
-              │               │               │
-   breed_flash.py       ssh_sysupgrade.py   ssh_mtd_write.py
-              │               │               │
-              └───────────────┴───────────────┘
-                              ▼
-                          [刷机完成]
-```
+| 脚本 | 功能 |
+|------|------|
+| `lenovo_lecoo_api.py` | 探测 ubus 公开 API（无需密码） |
+| `1.lecco_init.py` | 恢复出厂后首次设置密码（guide_status 0→1）|
 
-## Breed Web API（实测 2026-06-10）
+## 完整流程
 
-进入 breed 模式后，Web 服务在 `http://192.168.1.1/` 提供以下端点：
-
-### 上传：`POST /upload.html` (multipart/form-data)
-
-**两种模式**：
-
-| 模式 | `fw_type` | 适用 |
-|------|-----------|------|
-| 常规固件 | `generic` | **initramfs-kernel.bin**（裸 kernel+initrd 镜像） |
-| 编程器固件 | `fullflash` | 完整 32MB flash dump |
-
-**⚠️ breed 严禁刷入 sysupgrade 固件！** Sysupgrade 是 OpenWrt 专有格式（含 metadata 头/签名），breed 不识别也不应尝试。Breed 只接受**裸 firmware 镜像**（initramfs-kernel 或编程器固件）。
-
-**刷 sysupgrade 的正确路径**：
-1. 在 breed 里**刷 initramfs-kernel.bin** → 启动到 initramfs 系统
-2. 在 initramfs shell 里 `scp` 上传 sysupgrade.bin
-3. 在 initramfs shell 里跑 `sysupgrade -n <file>` → 写持久 rootfs + 自动重启
-
-**generic 模式字段**：
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `fw_type` | ✅ | 固定 `generic` |
-| `fw_file` | ✅ | **initramfs-kernel.bin**（裸 firmware 镜像） |
-| `fw_check` | ✅ | `=1` 才会上传 fw_file |
-| `flash_layout` | ✅ | D2 选 `reference` (kernel @ 0x50000) |
-| `submit` | ✅ | 固定 `Upload` |
-| `boot_file` + `boot_check` | ❌ | 同步刷 bootloader 时用 |
-| `eeprom_file` + `eeprom_check` | ❌ | 同步刷 Wi-Fi 校准时用 |
-
-**fullflash 模式字段**：
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `fw_type` | ✅ | 固定 `fullflash` |
-| `fullflash_file` | ✅ | 完整 32MB flash dump |
-| `fullflash_check` | ✅ | `=1` |
-| `submit` | ✅ | `Upload` |
-
-**Flash 布局选项**（`flash_layout`）：
-
-| 值 | 含义 | 适用 |
-|----|------|------|
-| `reference` | kernel @ 0x50000 | **D2 默认** |
-| `compact` | kernel @ 0x40000 | |
-| `big` | kernel @ 0x60000 | |
-| `phicomm` | kernel @ 0xA0000 | 斐讯 |
-| `wndr3700v5` | 特殊布局 | Netgear |
-
-### 实际刷写流程（用户抓包确认，2026-06-10）
+### 1. 检查路由器状态
 
 ```bash
-# 1) 上传固件（响应是确认页，含文件名/大小/MD5）
-POST /upload.html
-  Content-Type: multipart/form-data
-  boot_file=                     # 浏览器会发空字段
-  fw_check=1
-  fw_file=@<固件>
-  flash_layout=reference
-  fw_type=generic
-  submit=Upload
-  → 响应: has_fw=1, 4257 字节 HTML 确认页
-
-# 2) 浏览器点"更新"按钮 → 加载轮询页（同时触发实际刷写！）
-GET /upgrading.html
-  → 响应: 2802 字节 HTML 含 ajax.js 引用
-  ★ 这个 GET 才是"开始刷写"的触发点，不是 upload 也不是 POST
-  → 之后 ajax.js 自动 POST 轮询 /upgrade_query.html
-
-# 3) JS 自动 POST 轮询（每秒一次）
-POST /upgrade_query.html
-  Content-Type: application/x-www-form-urlencoded
-  Body: ""
-  → 响应: 纯数字（当前进度 %）
-
-# 4) 数字到 100 → 触发 reboot
-# 两种方式（任选）：
-#   a) breed 状态机自动 reboot（实测有时生效有时不生效）
-#   b) 手动：先 GET /reboot.html 拿动态 magic, 再 POST /rebooting.html
-GET /reboot.html
-  → 响应 HTML 含 <input name="magic" value="<动态值>">
-  ★ magic 每次 session 都不同！从 HTML 提取后立即使用
-
-POST /rebooting.html
-  Content-Type: multipart/form-data
-  submit=Reboot
-  magic=<从 /reboot.html 抓的值>
-  → 响应: 302 → /
-
-# 5) 等待 30~90s 看重启
-#    成功信号: Server header 从 "Breed/1.0" 变成 uhttpd（无 Server 字段）
-#    /cgi-bin/luci 返回 403 + x-luci-login-required
+python3 check_init.py
 ```
 
-**⚠️ 关键陷阱**：
-- `/upgrade_query.html` 必须用 **POST**，用 GET 也能拿到数字但**不会触发 100% 后的 reboot 状态机**
-- `magic` 是**动态生成**的，每次 `GET /reboot.html` 都不一样。HTML 里写死某个值是误导——必须**先 GET 再 POST**
+输出 `is_inited` + `guide_status`：
 
-### 下载：`GET /backup.html?type=<type>`
+| guide_status | 含义 | 下一步 |
+|-------------|------|--------|
+| 0 | 未初始化（出厂默认密码可用） | 直接 `2.login_get_sid --pwd admin` |
+| 1 | 已初始化（密码已被修改） | 走 `2.login_get_sid --pwd <已知密码>` |
 
-| type | 内容 |
+### 2. 登录获取 sid
+
+```bash
+python3 2.login_get_sid.py --pwd <密码>
+# → {"ok":true, "data":{"sid":"32位hex", "expires":300}}
+```
+
+- 用户名固定 `root`（前端硬编码）
+- 密码自动 base64 编码
+- sid 有效期 300 秒
+
+### 3. 开启 SSH
+
+```bash
+python3 3.ssh_enable.py --sid <sid>
+# → SSH 端口 22 开放
+```
+
+调用 `xapi.basic.open_dropbear`。SSH 密码同 Web 管理密码。
+
+### 4. 注入 breed
+
+```bash
+python3 4.breed_inject.py --pwd <管理密码>
+# → SCP → insmod → breed 写入 Flash
+```
+
+自动完成：
+1. SCP 上传 `newifi-d2-jail-break.ko` 到 `/tmp/`
+2. SSH `insmod /tmp/newifi-d2-jail-break.ko`
+3. batch 写入 breed 到 Flash，路由器重启
+
+**注意**：需要 `sshpass` 和 `scp -O`（路由器 dropbear 无 sftp-server）。
+
+### 5. 进入 breed 模式
+
+方式一：**物理 Reset 键**
+- 断电 → 按住 Reset → 上电 → 5 秒后松开 → breed 模式（192.168.1.1）
+
+方式二：**UDP 中断**（`breed_enter.py`）
+- 本机 IP 设为 192.168.1.x/24
+- 路由器断电待上电
+- 运行 `python3 breed_enter.py` 后立即给路由器上电
+- 等待 UDP 响应 "BREED:ABORTED"（约 21s）
+
+### 6. breed 刷写 initramfs
+
+```bash
+python3 5.breed_flash_firmware.py --file files/<initramfs-kernel.bin>
+```
+
+breed 只能刷 initramfs-kernel.bin（裸 kernel），**严禁刷 sysupgrade**。
+
+刷写过程：
+1. `POST /upload.html` 上传固件
+2. `GET /upgrading.html` 触发刷写
+3. `POST /upgrade_query.html` 轮询进度（约 40s）
+4. 100% 后路由器自动重启
+
+### 7. SSH 进 initramfs → sysupgrade
+
+initramfs 启动后（约 25s），SSH 无密码登录：
+
+```bash
+# 传 sysupgrade 固件
+sshpass -p "" scp -O files/<sysupgrade.bin> root@192.168.1.1:/tmp/firmware.bin
+
+# 执行刷写
+sshpass -p "" ssh root@192.168.1.1 "sysupgrade -n /tmp/firmware.bin"
+# → SSH 断连（预期成功）
+```
+
+### 8. 验证
+
+等待路由器重启完成（约 90s），SSH 登录验证：
+
+```bash
+ssh root@192.168.1.1
+cat /etc/openwrt_release
+```
+
+## API 体系（联想 Lecoo / 官方新路由 stock 固件）
+
+| 项目 | 说明 |
 |------|------|
-| `eeprom` | Wi-Fi 校准 (factory 分区, 64K) |
-| `full` | 完整 32MB flash dump |
-| `firmware` | ❌ 注释掉，不可用 |
+| 协议 | JSON-RPC 2.0 over HTTP POST `/ubus` |
+| 登录 | `session.xapi_login`，用户名 `root`，密码 base64 |
+| Token | `ubus_rpc_session`（32 位 hex，300s 过期） |
+| 权限 | `params[0]` 传 sid，`params[1..3]` 为 object/method/args |
 
-### 其他端点
+**常用 ubus API：**
 
-| 端点 | 功能 |
-|------|------|
-| `GET /index.html` | 系统信息（CPU/RAM/Flash/频率） |
-| `GET /clock.html` | CPU/DDR 频率设置 |
-| `GET /envedit.html` | uboot env 任意读写（默认禁用） |
-| `GET /envconf.html` | 预设字段写 env |
-| `GET /reboot.html` | 手动重启（一般不用，flash 100% 自动重启） |
-| `GET /reset.html` | 恢复出厂 |
+| 操作 | 调用 | 无需认证 |
+|------|------|---------|
+| 固件版本 | `xapi.basic.get_version` | ✅ |
+| 探测状态 | `xapi.basic.get_guide_status` | ✅ |
+| 开 SSH | `xapi.basic.open_dropbear` | ❌ |
+| 重启 | `xapi.system.reboot` | ❌ |
+| 恢复出厂 | `xapi.basic.reset_start` | ❌ |
+| 改密码 | `xapi.sys.set_login_passwd_base64(old,new,confirm)` | ❌ |
+| 查系统 | `system.board` / `system.info` | ❌ |
 
-## BREED:ABORT 协议（已验证）
+## 已知固件
 
-**触发**：路由器通电后，breed 在极短时间窗内监听 UDP 37541 端口。
+| 固件 | 适用 | 文件 |
+|------|------|------|
+| **ImmortalWrt 25.12.0-rc2** | ✅ 实机验证 | `immortalwrt-ramips-mt7621-d-team_newifi-d2-squashfs-sysupgrade.bin` |
+| OpenWrt 25.12.4 | initramfs 已验证 | `openwrt-25.12.4-ramips-mt7621-d-team_newifi-d2-initramfs-kernel.bin` |
+| 联想 Lecoo 官方 | 版本 3.2.1.7437 beta (`newifi-d2l`) | 出厂预装 |
+| 新路由官方 | 版本 3.2.1.7400 beta (`newifi-d2`) | 出厂预装 |
 
-| 方向 | 地址 | 载荷 | 字节 |
-|------|------|------|------|
-| PC → 路由器 | `255.255.255.255:37541` (广播) | `BREED:ABORT` | 12 |
-| 路由器 → PC | `<router_ip>:37540` (单播) | `BREED:ABORTED` | 14 |
+## Troubleshooting
 
-**实施参数**：
-- 广播间隔：500ms（实测 21s 内约 43 次尝试）
-- 监听端口：37540
-- Linux 绑定接口：`SO_BINDTODEVICE`（需 `sudo`）
-- 默认超时：180s（3 分钟，给手动通电留足时间）
+参见 `troubleshooting.md`。
