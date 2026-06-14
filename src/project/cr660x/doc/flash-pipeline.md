@@ -1,5 +1,10 @@
 # CR660X — 刷机流水线
 
+> ⚠️ **2026-06-14 标记：SSH 破解方法不通用。** 
+> smartcontroller scene 注入（CVE-2023-26319）只在部分固件版本/运营商定制上可用。
+> **在确认具体版本可用之前，不再推进 CR660X 编排器开发。**
+> 如需刷机，请按各步骤脚本手动调试。
+
 > CR660X 是小米/红米路由器系列（CR6606/TR606 联通 / CR6608/TR608 移动 / CR6609/TR609 电信）。当前是 **stock 固件**（未刷 pb-boot/breed），HTTP 服务是 stock 自带的 nginx/1.12.2。
 > init_info API 跟 ax6/ax3600 完全一致，KEY/IV 一样，密码学一样，**剥壳后流程跟 ax6 同结构**。
 
@@ -10,7 +15,7 @@
 | 0 | `get_router_info.sh` | ✅ 实测 |
 | 1 | `1.official_init.py` | ✅ 实测 |
 | 2 | `2.login_get_stok.py` | ✅ 实测 |
-| 3 | `3.enable_ssh.py` | ✅ 实测 (hackCheck=0, scene 链路通, 真 SSH 进 root) |
+| 3 | `3.enable_ssh.py` | ⚠️ **SSH 方法不通用，待确认** |
 | 4 | `4.firmware_upload_on_miwifi.sh` | ✅ 实测 (scp 上传 + 真读到文件) |
 | 5 | `5.uboot_write_in_miwifi.py` | ✅ 实测 (mtd unlock + mtd write /dev/mtd0) |
 | 6 | `6.openwrt_write_in_miwifi.py` | ✅ 实测 (sysupgrade -F initramfs, 路由器自动重启) |
@@ -21,9 +26,8 @@
 
 ## 全链路状态
 
-**全链路闭环**：check_ip → login → enable_ssh → scp 固件 → pb-boot write → sysupgrade initramfs → scp 正式固件 → sysupgrade final → **正式 OpenWrt**
-
-不再有待完成步骤。
+**当前状态**：3.enable_ssh.py 的 smartcontroller scene 注入**不通用**，部分固件/运营商定制版不可用。
+在确认通用破解方法前，暂停编排器开发。
 
 ## 刷机流程
 

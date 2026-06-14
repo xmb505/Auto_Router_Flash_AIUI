@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-# all_official_2_openwrt.py — AX3600 官方固件 → LibWrt/OpenWrt 全自动刷机
+# all_official_2_openwrt.py — AX3000T 官方固件 → OpenWrt 全自动刷机
 #
-# 适用机型: 小米 AX3600 (R3600) — IPQ8071A
+# 适用机型: 小米 AX3000T (RD03) — MT7981 (Filogic 820)
 #
 # 流程（基于 2026-06-14 实机验证）:
-#   ping 检测 → get_router_info → 验证硬件
-#   1.official_init (工厂态) → 2.login_get_stok
-#   [可选 4.official_upgrade 降级到 1.0.17]
-#   [等重启] → 1.official_init (1.0.17) → 2.login_get_stok
-#   3.enable_ssh → set_uboot_env → 5.firmware_upload
-#   6.miwifi_2_openwrt → set_miwifi_uboot_partition → reboot
+#   ping 检测 → init_info → 验证硬件
+#   1.official_init → 2.login_get_stok → 3.enable_ssh
+#   4.flash_uboot (刷 FIP + 自动重启 → TFTP initramfs)
+#   5.sysupgrade_openwrt (initramfs → 完整 OpenWrt)
+#   [可选 6.custom_openwrt]
+#
+# 前置条件: 主机需运行 TFTP 服务器（提供 initramfs-recovery.itb）
 #
 # 输出: stdout = 单个 JSON
 #       stderr = 默认空白，--debug 时打印进度
@@ -32,17 +33,15 @@ STEP_NAME = "all_official_2_openwrt"
 DEBUG = False
 
 # ============ 常量 ============
-DEFAULT_ROUTER_IP = "192.168.31.1"
+DEFAULT_STOCK_IP = "192.168.31.1"
+DEFAULT_OPENWRT_IP = "192.168.1.1"
 INIT_INFO_URL = "http://{}/cgi-bin/luci/api/xqsystem/init_info"
 INIT_INFO_TIMEOUT = 5
-REBOOT_WAIT_TIMEOUT = 120
+REBOOT_WAIT_TIMEOUT = 180
 SSH_WAIT_TIMEOUT = 90
-SSH_RETRY_MAX = 3        # enable_ssh 最多重试次数
-SSH_RETRY_WAIT = 15      # 每次重试后等 SSH 端口的时间（秒）
-OPENWRT_WAIT_TIMEOUT = 120
-
-# 免降级的固件版本
-KNOWN_GOOD_VERSION = "1.0.17"
+SSH_RETRY_MAX = 3
+SSH_RETRY_WAIT = 15
+OPENWRT_WAIT_TIMEOUT = 180
 
 DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "all_official_2_openwrt.ini")
 
@@ -119,6 +118,22 @@ def wait_ping_up(ip: str, timeout: int = 120) -> bool:
     return False
 
 
+def wait_port_down(ip: str, port: int, timeout: int = 30) -> bool:
+    """等待端口关闭"""
+    log(f"等待 {ip}:{port} 关闭 (timeout={timeout}s)...")
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            with socket.create_connection((ip, port), timeout=3):
+                time.sleep(2)
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            elapsed = round(time.time() - start, 1)
+            log(f"{ip}:{port} 已关闭 (≈{elapsed}s)")
+            return True
+    log(f"等待 {ip}:{port} 关闭超时")
+    return False
+
+
 def wait_port_open(ip: str, port: int, timeout: int = 90) -> bool:
     log(f"等待 {ip}:{port} 开放 (timeout={timeout}s)...")
     start = time.time()
@@ -129,7 +144,7 @@ def wait_port_open(ip: str, port: int, timeout: int = 90) -> bool:
             elapsed = round(time.time() - start, 1)
             log(f"{ip}:{port} 已开放 (≈{elapsed}s)")
             return True
-        except (OSError, ConnectionRefusedError, socket.timeout):
+        except (socket.timeout, ConnectionRefusedError, OSError):
             time.sleep(2)
     log(f"等待 {ip}:{port} 超时 ({timeout}s)")
     return False
@@ -146,7 +161,6 @@ def fetch_init_info(ip: str) -> dict:
 
 
 def wait_http_ready(ip: str, timeout: int = 120) -> None:
-    """轮询 init_info 直到 HTTP 返回有效 JSON"""
     log("等待 HTTP 服务就绪...")
     for i in range(timeout):
         try:
@@ -191,7 +205,6 @@ def run_script(cmd: list, label: str) -> dict:
 
 
 def run_shell_script(script_name: str, args: list, label: str) -> dict:
-    """运行 .sh 脚本，解析 stdout JSON（支持对象或数组）。"""
     cmd = [os.path.join(SCRIPT_DIR, script_name)] + args
     log(f"[{label}] 运行: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
@@ -222,18 +235,11 @@ def run_shell_script(script_name: str, args: list, label: str) -> dict:
     return data.get("data", {k: v for k, v in data.items() if k != "ok"})
 
 
-# ============ 版本检查 ============
-
-def needs_downgrade(romversion: str) -> bool:
-    """判断是否需要降级 — 只 1.0.17 免降级"""
-    return romversion != KNOWN_GOOD_VERSION
-
-
 # ============ CLI ============
 
 def build_argparse() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="AX3600 官方固件 → LibWrt/OpenWrt 全自动刷机",
+        description="AX3000T 官方固件 → OpenWrt 全自动刷机",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "示例:\n"
@@ -246,8 +252,10 @@ def build_argparse() -> argparse.ArgumentParser:
                    help="管理员密码（默认: 12345678，即 init 设的密码）")
     p.add_argument("--config", default=DEFAULT_CONFIG,
                    help=f"INI 配置文件路径（默认: {DEFAULT_CONFIG}）")
-    p.add_argument("--ip", default=DEFAULT_ROUTER_IP,
-                   help=f"路由器 IP (默认: {DEFAULT_ROUTER_IP})")
+    p.add_argument("--step", type=int, default=1, choices=[1, 2, 3, 4, 5, 6],
+                   help="起始步骤（1=从头, 5=initramfs 模式, 仅刷 sysupgrade）")
+    p.add_argument("--ip", default=DEFAULT_STOCK_IP,
+                   help=f"路由器 stock IP (默认: {DEFAULT_STOCK_IP})")
     p.add_argument("--debug", action="store_true",
                    help="打印进度日志到 stderr（透传给子脚本）")
     return p
@@ -256,7 +264,7 @@ def build_argparse() -> argparse.ArgumentParser:
 def help_json_schema() -> None:
     schema = {
         "script": STEP_NAME,
-        "description": "AX3600 官方固件 → LibWrt/OpenWrt 全自动刷机",
+        "description": "AX3000T 官方固件 → OpenWrt 全自动刷机",
         "args": [
             {"name": "--pwd", "type": "string", "default": "12345678",
              "required": False,
@@ -264,25 +272,27 @@ def help_json_schema() -> None:
             {"name": "--config", "type": "file", "default": DEFAULT_CONFIG,
              "required": False,
              "description": "INI 配置文件路径"},
-            {"name": "--ip", "type": "string", "default": DEFAULT_ROUTER_IP,
+            {"name": "--step", "type": "int", "default": 1,
              "required": False,
-             "description": "路由器 IP"},
+             "description": "起始步骤（1=从头, 5=initramfs 模式）"},
+            {"name": "--ip", "type": "string", "default": DEFAULT_STOCK_IP,
+             "required": False,
+             "description": "路由器 stock IP"},
             {"name": "--debug", "type": "flag", "default": False,
              "required": False,
              "description": "打印进度日志到 stderr（透传给子脚本）"},
         ],
-        "config_format": "INI: [firmware].ubi_file, [firmware].downgrade_file (可选)",
+        "config_format": "INI: [firmware].uboot_file, [firmware].sysupgrade_file, [firmware].overlay_file (可选)",
         "examples": [
             "python3 all_official_2_openwrt.py",
-            "python3 all_official_2_openwrt.py --pwd 12345678",
-            "python3 all_official_2_openwrt.py --config my.ini --debug",
+            "python3 all_official_2_openwrt.py --debug",
         ],
         "pipeline": [
-            "ping", "get_router_info", "1.official_init", "2.login_get_stok",
-            "4.official_upgrade (downgrade, optional)", "3.enable_ssh",
-            "set_uboot_env", "5.firmware_upload", "6.miwifi_2_openwrt",
-            "set_miwifi_uboot_partition", "reboot",
+            "ping", "init_info", "1.official_init", "2.login_get_stok",
+            "3.enable_ssh", "4.flash_uboot",
+            "5.sysupgrade_openwrt", "6.custom_openwrt (optional)",
         ],
+        "note": "需要主机运行 TFTP 服务器提供 initramfs-recovery.itb",
     }
     print(json.dumps(schema, ensure_ascii=False, indent=2))
 
@@ -299,86 +309,77 @@ def main() -> int:
     args = build_argparse().parse_args()
     DEBUG = args.debug
 
-    ip = args.ip
+    stock_ip = args.ip
+    openwrt_ip = DEFAULT_OPENWRT_IP
     pwd = args.pwd
+    step = args.step
 
     # 读 INI 配置
     cfg = read_config(args.config)
-    firmware = cfg.get("firmware.ubi_file", "")
-    downgrade_file = cfg.get("firmware.downgrade_file", "") or None
+    uboot_file = cfg.get("firmware.uboot_file", "")
+    sysupgrade_file = cfg.get("firmware.sysupgrade_file", "")
+    overlay = cfg.get("firmware.overlay_file", "") or None
 
-    if not firmware:
-        emit_err("INI 中未配置 firmware.ubi_file", reason="file_not_found",
-                 failed_step="config")
+    if not uboot_file or not sysupgrade_file:
+        emit_err("INI 需要配置 firmware.uboot_file 和 firmware.sysupgrade_file",
+                 reason="file_not_found", failed_step="config")
         return 1
-    firmware = os.path.join(SCRIPT_DIR, firmware) if not os.path.isabs(firmware) else firmware
-    if downgrade_file:
-        downgrade_file = os.path.join(SCRIPT_DIR, downgrade_file) if not os.path.isabs(downgrade_file) else downgrade_file
+
+    def resolve(p):
+        return os.path.join(SCRIPT_DIR, p) if not os.path.isabs(p) else p
+
+    uboot_file = resolve(uboot_file)
+    sysupgrade_file = resolve(sysupgrade_file)
+    if overlay:
+        overlay = resolve(overlay)
 
     steps_done = []
     total_start = time.time()
 
     try:
-        # ========== 阶段 0: 检测路由器 ==========
-        log("=== 阶段 0: 检测路由器 ===")
+        # ========== 分水岭: --step 5 跳过 stock 阶段 ==========
+        if step >= 5:
+            log(f"initramfs 模式 (--step {step})，跳过 stock 阶段")
+        else:
+            # ========== 阶段 0: 检测路由器 ==========
+            log("=== 阶段 0: 检测路由器 ===")
 
-        if not ping_host(ip, 3):
-            raise RuntimeError(f"路由器 {ip} 不可达（ping 超时）")
-        log(f"路由器 {ip} 在线")
-        steps_done.append("ping_ok")
+            if not ping_host(stock_ip, 3):
+                raise RuntimeError(f"路由器 {stock_ip} 不可达（ping 超时）")
+            log(f"路由器 {stock_ip} 在线")
+            steps_done.append("ping_ok")
 
-        info = fetch_init_info(ip)
-        model = info.get("model", "")
-        hardware = info.get("hardware", "")
-        romversion = info.get("romversion", "")
-        inited = info.get("inited")
-        log(f"型号: {model}, 硬件: {hardware}, 版本: {romversion}, inited: {inited}")
+            info = fetch_init_info(stock_ip)
+            model = info.get("model", "")
+            hardware = info.get("hardware", "")
+            romversion = info.get("romversion", "")
+            inited = info.get("inited")
+            log(f"型号: {model}, 硬件: {hardware}, 版本: {romversion}, inited: {inited}")
 
-        if "ax3600" not in model.lower() and "r3600" not in hardware.lower():
-            raise RuntimeError(
-                f"硬件不匹配: 期望 AX3600/R3600, 实际 model={model}, hardware={hardware}")
-        log("硬件验证通过: AX3600")
-        steps_done.append("verified_ax3600")
-
-        # inited=1 → 先试默认密码，不行再报错要求 Reset
-        if inited == 1:
-            log("路由器已初始化 (inited=1), 尝试默认密码...")
-            try:
-                login_data = run_script(
-                    [sys.executable,
-                     os.path.join(SCRIPT_DIR, "2.login_get_stok.py"),
-                     "--ip", ip, "--pwd", pwd],
-                    "2.login_get_stok (inited=1 retry)"
-                )
-                stok = login_data.get("stok", "")
-                if stok:
-                    log("默认密码可用，跳过初始化")
-                    steps_done.append("login_ok_inited")
-                    # 跳到 SSH 阶段（跳过 init 和降级）
-                    _skip_init = True
-                else:
-                    raise RuntimeError("登录失败")
-            except RuntimeError:
+            if "rd03" not in model.lower() and "ax3000t" not in hardware.lower():
                 raise RuntimeError(
-                    "路由器已初始化 (inited=1), 默认密码登录失败。"
+                    f"硬件不匹配: 期望 AX3000T/RD03, 实际 model={model}")
+            log("硬件验证通过: AX3000T")
+            steps_done.append("verified_ax3000t")
+
+            if inited == 1:
+                raise RuntimeError(
+                    "路由器已初始化 (inited=1), 不知道管理密码。"
                     "请物理 Reset 路由器（按住 RESET 孔 5-10 秒上电）"
                     "回到工厂态后再试")
-        else:
-            _skip_init = False
             steps_done.append("factory_ok")
 
-        # ========== 阶段 1: 出厂初始化（工厂态才需要） ==========
-        if not _skip_init:
+            # ========== 阶段 1: 出厂初始化 ==========
             log("=== 阶段 1: 出厂初始化 ===")
             init_data = run_script(
                 [sys.executable,
                  os.path.join(SCRIPT_DIR, "1.official_init.py"),
-                 "--ip", ip,
+                 "--ip", stock_ip,
                  "--admin-pwd", pwd,
                  "--debug"] if DEBUG else
                 [sys.executable,
                  os.path.join(SCRIPT_DIR, "1.official_init.py"),
-                 "--ip", ip,
+                 "--ip", stock_ip,
                  "--admin-pwd", pwd],
                 "1.official_init"
             )
@@ -390,7 +391,7 @@ def main() -> int:
             log("=== 阶段 2: 登录获取 stok ===")
             login_cmd = [sys.executable,
                          os.path.join(SCRIPT_DIR, "2.login_get_stok.py"),
-                         "--ip", ip, "--pwd", pwd]
+                         "--ip", stock_ip, "--pwd", pwd]
             if DEBUG:
                 login_cmd.append("--debug")
             login_data = run_script(login_cmd, "2.login_get_stok")
@@ -399,147 +400,79 @@ def main() -> int:
                 raise RuntimeError("登录失败: 未获取到 stok")
             steps_done.append("2.login_get_stok")
 
-        # ========== 阶段 3: 降级（可选） ==========
-        if downgrade_file and needs_downgrade(romversion):
-            log(f"=== 阶段 3: 降级到 {KNOWN_GOOD_VERSION} ===")
-            upgrade_cmd = [sys.executable,
-                           os.path.join(SCRIPT_DIR, "4.official_upgrade.py"),
-                           "--ip", ip, "--stok", stok,
-                           "--file", downgrade_file]
-            if DEBUG:
-                upgrade_cmd.append("--debug")
-            run_script(upgrade_cmd, "4.official_upgrade")
-            log("降级触发, 等待路由器重启...")
-            steps_done.append("4.official_upgrade")
-
-            # 等待重启: ping down → ping up → 轮询 HTTP
-            wait_ping_down(ip, 30)
-            if not wait_ping_up(ip, REBOOT_WAIT_TIMEOUT):
-                raise RuntimeError("降级后等待路由器上线超时")
-            wait_http_ready(ip)
-
-            # 重新初始化（降级清 NVRAM, inited→0）
-            log(f"=== 阶段 3b: 降级后重初始化 ({KNOWN_GOOD_VERSION}) ===")
-            run_script(
-                [sys.executable,
-                 os.path.join(SCRIPT_DIR, "1.official_init.py"),
-                 "--ip", ip, "--admin-pwd", pwd],
-                "1.official_init (re-init)"
-            )
-            steps_done.append("1.official_init_post_downgrade")
-
-            # 重新登录拿 stok
-            login_data = run_script(
-                [sys.executable,
-                 os.path.join(SCRIPT_DIR, "2.login_get_stok.py"),
-                 "--ip", ip, "--pwd", pwd],
-                "2.login_get_stok (re-login)"
-            )
-            stok = login_data.get("stok", "")
-            if not stok:
-                raise RuntimeError("降级后重登录失败: 未获取到 stok")
-            steps_done.append("2.login_get_stok_post_downgrade")
-        else:
-            if downgrade_file:
-                log(f"版本 {romversion} 不需要降级，跳过")
-            else:
-                log("未配置降级文件，跳过降级")
-
-        # ========== 阶段 4: 启用 SSH（最多重试 SSH_RETRY_MAX 次） ==========
-        log("=== 阶段 4: 注入开 SSH ===")
-        ssh_ok = False
-        for attempt in range(1, SSH_RETRY_MAX + 1):
-            if attempt > 1:
-                log(f"SSH 重试第 {attempt} 次...")
+            # ========== 阶段 3: 启用 SSH ==========
+            log("=== 阶段 3: 注入开 SSH (start_binding) ===")
             ssh_cmd = [sys.executable,
                        os.path.join(SCRIPT_DIR, "3.enable_ssh.py"),
-                       "--ip", ip, "--stok", stok]
+                       "--ip", stock_ip, "--stok", stok]
             if DEBUG:
                 ssh_cmd.append("--debug")
-            try:
-                ssh_data = run_script(ssh_cmd, f"3.enable_ssh (attempt {attempt})")
-                log(f"SSH 注入成功: port={ssh_data.get('ssh_port', '?')}")
-            except RuntimeError as e:
-                if attempt < SSH_RETRY_MAX:
-                    log(f"SSH 注入失败，重试: {e}")
-                    continue
-                raise
+            ssh_data = run_script(ssh_cmd, "3.enable_ssh")
+            log(f"SSH 启用: port={ssh_data.get('ssh_port', '?')}")
+            steps_done.append("3.enable_ssh")
 
-            # 等 dropbear 就绪
-            log(f"等待 SSH 端口 (attempt {attempt}, {SSH_RETRY_WAIT}s)...")
-            time.sleep(SSH_RETRY_WAIT)
-            if wait_port_open(ip, 22, SSH_WAIT_TIMEOUT):
-                log("SSH 端口 22 就绪")
-                ssh_ok = True
-                break
-            log("SSH 端口未就绪，准备重试 enable_ssh...")
+            time.sleep(10)
+            if not wait_port_open(stock_ip, 22, SSH_WAIT_TIMEOUT):
+                raise RuntimeError("SSH 端口 22 未在预期时间内开放")
+            log("SSH 端口 22 就绪")
 
-        if not ssh_ok:
-            raise RuntimeError(f"SSH 端口 22 未在预期时间内开放（已重试 {SSH_RETRY_MAX} 次）")
-        steps_done.append("3.enable_ssh")
+            # ========== 阶段 4: 刷 FIP uboot ==========
+            log("=== 阶段 4: 刷 FIP uboot ===")
+            flash_uboot_cmd = [sys.executable,
+                               os.path.join(SCRIPT_DIR, "4.flash_uboot.py"),
+                               "--ip", stock_ip, "--file", uboot_file]
+            if DEBUG:
+                flash_uboot_cmd.append("--debug")
+            run_script(flash_uboot_cmd, "4.flash_uboot")
+            log("FIP 写入完成，路由器自动重启（TFTP 拉 initramfs）")
+            steps_done.append("4.flash_uboot")
 
-        # ========== 阶段 5: 设置 nvram flags ==========
-        log("=== 阶段 5: 设置 nvram flags ===")
-        run_shell_script(
-            "set_uboot_env.sh",
-            ["--ip", ip],
-            "set_uboot_env"
-        )
-        steps_done.append("set_uboot_env")
+            # flash_uboot 重启后等 60s 让 uboot TFTP 拉 initramfs
+            log("等待 initramfs 启动 (60s)...")
+            time.sleep(60)
 
-        # ========== 阶段 6: 上传固件 ==========
-        log("=== 阶段 6: 上传固件到 /tmp/ ===")
-        upload_args = ["--ip", ip, "--file", firmware]
+        # ========== 阶段 5: sysupgrade（initramfs → 完整 OpenWrt） ==========
+        log("=== 阶段 5: sysupgrade 到完整 OpenWrt ===")
+
+        # 5.sysupgrade_openwrt.py 内部等 initramfs SSH → scp → sysupgrade → 等重启 → 等上线
+        sysupgrade_cmd = [sys.executable,
+                          os.path.join(SCRIPT_DIR, "5.sysupgrade_openwrt.py"),
+                          "--ip", openwrt_ip,
+                          "--file", sysupgrade_file]
         if DEBUG:
-            upload_args.append("--debug")
-        upload_data = run_shell_script(
-            "5.firmware_upload_on_miwifi.sh",
-            upload_args,
-            "5.firmware_upload"
-        )
-        target = upload_data.get("target", os.path.basename(firmware))
-        fname = os.path.basename(target)
-        steps_done.append("5.firmware_upload")
+            sysupgrade_cmd.append("--debug")
+        sysupgrade_data = run_script(sysupgrade_cmd, "5.sysupgrade_openwrt")
+        log(f"sysupgrade 完成: reboot={sysupgrade_data.get('reboot')}")
+        steps_done.append("5.sysupgrade_openwrt")
 
-        # ========== 阶段 7: 烧镜像 ==========
-        log("=== 阶段 7: ubiformat 烧固件 ===")
-        flash_cmd = [sys.executable,
-                     os.path.join(SCRIPT_DIR, "6.miwifi_2_openwrt.py"),
-                     "--ip", ip, "--file-name", fname]
-        if DEBUG:
-            flash_cmd.append("--debug")
-        flash_data = run_script(flash_cmd, "6.miwifi_2_openwrt")
-        target_mtd = flash_data.get("target_mtd", "?")
-        part = flash_data.get("part",
-                              "1" if "mtd13" in str(target_mtd) else "0")
-        log(f"固件写入 {target_mtd}")
-        steps_done.append("6.miwifi_2_openwrt")
-
-        # ========== 阶段 8: 切启动分区 ==========
-        log("=== 阶段 8: 切启动分区 ===")
-        run_shell_script(
-            "set_miwifi_uboot_partition.sh",
-            ["--ip", ip, "--part", str(part)],
-            "set_miwifi_uboot_partition"
-        )
-        log(f"切到 part={part}")
-        steps_done.append("set_miwifi_uboot_partition")
-
-        # ========== 阶段 9: reboot ==========
-        log("=== 阶段 9: reboot 激活 ===")
-        run_shell_script(
-            "miwifi_ssh.sh",
-            ["--ip", ip, "--cmd", "reboot"],
-            "reboot"
-        )
-        steps_done.append("reboot")
-
-        # ========== 阶段 10: 等待 OpenWrt 上线 ==========
-        log("等待 OpenWrt 上线 (192.168.1.1)...")
-        if wait_ping_up("192.168.1.1", OPENWRT_WAIT_TIMEOUT):
-            log("OpenWrt 已上线")
+        # 等 SSH 断连（sysupgrade 触发的重启）再上线
+        log("等待 OpenWrt SSH 上线...")
+        wait_port_down(openwrt_ip, 22, 30)
+        if wait_port_open(openwrt_ip, 22, OPENWRT_WAIT_TIMEOUT):
+            log("OpenWrt SSH 就绪")
         else:
-            log("OpenWrt 上线超时（可能是 stock IP 未变），继续")
+            log("OpenWrt SSH 超时", level="WARN")
+
+        # ========== 阶段 6: 应用 overlay（可选，重试最多 3 次） ==========
+        if overlay:
+            log("=== 阶段 6: 应用 overlay ===")
+            for attempt in range(1, 4):
+                try:
+                    overlay_cmd = [sys.executable,
+                                   os.path.join(SCRIPT_DIR, "6.custom_openwrt.py"),
+                                   "--ip", openwrt_ip,
+                                   "--file", overlay]
+                    if DEBUG:
+                        overlay_cmd.append("--debug")
+                    run_script(overlay_cmd, f"6.custom_openwrt (attempt {attempt})")
+                    steps_done.append("6.custom_openwrt")
+                    break
+                except RuntimeError as e:
+                    if attempt < 3:
+                        log(f"Overlay 失败，重试 ({attempt}/3): {e}")
+                        time.sleep(10)
+                    else:
+                        log(f"Overlay 最终失败: {e}", level="WARN")
 
     except RuntimeError as e:
         failed_step = steps_done[-1] if steps_done else "pre_check"
@@ -552,10 +485,10 @@ def main() -> int:
     emit_ok({
         "steps": steps_done,
         "total_duration_sec": total_sec,
-        "model": "AX3600",
+        "model": "AX3000T",
         "target": "openwrt",
-        "firmware": os.path.basename(firmware),
-        "downgraded": downgrade_file is not None and needs_downgrade(romversion),
+        "firmware": os.path.basename(sysupgrade_file),
+        "overlay_applied": overlay is not None,
     })
     return 0
 

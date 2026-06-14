@@ -2,7 +2,7 @@
 name: ax3000t-stock-to-openwrt-pipeline
 description: 小米 AX3000T (RD03) 从 stock 固件刷到 ImmortalWrt/OpenWrt 的完整流水线——start_binding 注入启用 SSH + FIP uboot 替换 + sysupgrade initramfs + custom overlay，全步骤定义（含 old_coding 参考和 hackCheck 绕过细节）
 source: auto-skill
-extracted_at: '2026-06-14T05:21:08.988Z'
+extracted_at: '2026-06-14T08:08:17.105Z'
 ---
 
 # AX3000T (RD03) stock → OpenWrt 刷机流水线
@@ -117,9 +117,60 @@ cmd = cmd.replace(";", "\n").replace("|", "\n")
 | 加密模式 | SHA256 (newEncryptMode=1) | SHA1 (newEncryptMode=0) 或 SHA256 |
 | 重启需求 | 无需重启（SSH 秒级就绪） | AX5 需重启，AX3600 秒级 |
 
+## 编排器（一键刷机）
+
+`ax3000t/all_official_2_openwrt.py` 封装了 6 步全流程。用 INI 配置文件驱动：
+
+```ini
+[firmware]
+uboot_file = files/immortalwrt-...-ubootmod-bl31-uboot.fip
+sysupgrade_file = files/immortalwrt-...-ubootmod-squashfs-sysupgrade.itb
+overlay_file = files/overlay-mocktool.tar.gz
+```
+
+```bash
+python3 all_official_2_openwrt.py
+```
+
+### 编排器执行逻辑
+
+```
+--step 1（默认）: 完整流水线
+ping → init_info → 验证 RD03 →
+  inited=1 → 报错要求 Reset
+  inited=0 → init → login → enable_ssh
+  → 4.flash_uboot（mtd write FIP → 自动重启 + TFTP 拉 initramfs）
+  → sleep(60) 等 initramfs 启动
+  → 5.sysupgrade_openwrt（scp → sysupgrade → 等重启）
+  → 6.custom_openwrt（可选 overlay）
+
+--step 5: initramfs 模式（路由器已在 192.168.1.1 initramfs）
+  → 跳过 stock 所有阶段
+  → 5.sysupgrade_openwrt
+  → 6.custom_openwrt（可选）
+```
+
+### 注意事项
+
+- **前置条件**：主机需要运行 TFTP 服务器提供 initramfs-recovery.itb
+- **IP 切换**：stock 系统在 192.168.31.1，刷 FIP 重启后 initramfs/OpenWrt 在 192.168.1.1
+- **sleep(60)**：`4.flash_uboot` 后必须等 60s 让 uboot 完成 TFTP 拉取 initramfs 启动，再跑 sysupgrade
+- **sysupgrade 等待**：`5.sysupgrade_openwrt.py` 的 `wait_openwrt_boot()` 先等 SSH 断连（sysupgrade 触发重启），再等上线（新系统就绪），避免 initramfs SSH 残留导致误判
+
+### 实机验证（2026-06-14）
+
+- 型号：AX3000T (RD03)
+- 固件：1.0.47（出厂态，需 init）
+- SSH：start_binding 注入一次成功（SSH 秒级就绪）
+- FIP：`4.flash_uboot.py --file uboot.fip` 成功写入 mtd5
+- 重启后：TFTP 正常拉取 initramfs，192.168.1.1 约 7s 上线
+- sysupgrade：`5.sysupgrade_openwrt.py --file sysupgrade.itb` 完成
+- overlay：`6.custom_openwrt.py --file overlay-mocktool.tar.gz` 完成
+
 ## 来源
 
 - `old_coding/Auto_Flash_Router/AX3000T/enable_ssh.py` — 原始注入实现
 - `old_coding/Auto_Flash_Router/AX3000T/rce.py` — 通用注入工具（含 `;`/`|` → `\n` 安全替换）
 - `old_coding/Auto_Flash_Router/AX3000T/auto_init.py` — 出厂初始化参考
-- `src/project/ax3000t/` — 当前重构的步骤脚本
+- `src/project/ax3000t/` — 当前重构的步骤脚本（含编排器）
+- 2026-06-14 实机验证：全链路 1.0.47 → OpenWrt

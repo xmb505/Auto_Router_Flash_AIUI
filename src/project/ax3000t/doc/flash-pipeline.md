@@ -1,5 +1,15 @@
 # AX3000T 刷机流水线 (Flash Pipeline)
 
+## 快速入口
+
+```bash
+# 前置条件：主机运行 TFTP 服务器，提供 initramfs-recovery.itb
+# 编辑 INI → 直接跑
+$EDITOR all_official_2_openwrt.ini
+python3 all_official_2_openwrt.py
+python3 all_official_2_openwrt.py --debug
+```
+
 ## 概述
 
 小米路由器 AX3000T (RD03) 从 stock 固件到 OpenWrt 的端到端刷机流程。

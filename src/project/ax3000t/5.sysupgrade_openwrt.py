@@ -109,12 +109,32 @@ def file_md5(path: str) -> str:
 
 
 def wait_openwrt_boot(ip: str, timeout: int = 180) -> bool:
-    """等待完整 OpenWrt 系统上线"""
+    """等待 sysupgrade 触发的重启完成（先等 SSH 断连，再等上线）"""
     import socket
     start = time.time()
+
+    # Phase 1: 等 SSH 断连（sysupgrade 触发重启）
+    down_timeout = min(timeout // 2, 60)
+    log(f"等待 SSH 断连 (timeout={down_timeout}s)...")
+    while time.time() - start < down_timeout:
+        try:
+            with socket.create_connection((ip, 22), timeout=3):
+                time.sleep(2)
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            elapsed = round(time.time() - start, 1)
+            log(f"SSH 已断连 (≈{elapsed}s)")
+            break
+    else:
+        log("SSH 未断连，直接进入上线等待")
+
+    # Phase 2: 等 SSH 重新上线（新系统就绪）
+    log("等待 OpenWrt SSH 上线...")
+    remaining = timeout - (time.time() - start)
     while time.time() - start < timeout:
         try:
             with socket.create_connection((ip, 22), timeout=3):
+                elapsed = round(time.time() - start, 1)
+                log(f"OpenWrt SSH 上线 (≈{elapsed}s)")
                 return True
         except (socket.timeout, ConnectionRefusedError, OSError):
             time.sleep(5)

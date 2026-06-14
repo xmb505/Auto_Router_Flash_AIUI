@@ -427,22 +427,37 @@ def main() -> int:
 
         # ========== 阶段 9: 等待 OpenWrt 上线 ==========
         log("等待 OpenWrt 上线 (192.168.1.1)...")
+        openwrt_online = False
         if wait_ping_up("192.168.1.1", OPENWRT_WAIT_TIMEOUT):
-            log("OpenWrt 已上线")
+            log("OpenWrt 已上线，等待 SSH 就绪...")
+            if wait_port_open("192.168.1.1", 22, 60):
+                openwrt_online = True
+                log("OpenWrt SSH 就绪")
+            else:
+                log("OpenWrt SSH 超时")
         else:
             log("OpenWrt 上线超时（可能是 stock IP 未变），继续")
 
-        # ========== 阶段 10: 应用 overlay（可选） ==========
-        if overlay:
+        # ========== 阶段 10: 应用 overlay（可选，重试最多 3 次） ==========
+        if overlay and openwrt_online:
             log("=== 阶段 10: 应用 overlay ===")
-            overlay_cmd = [sys.executable,
-                           os.path.join(SCRIPT_DIR, "7.custom_openwrt.py"),
-                           "--ip", "192.168.1.1",
-                           "--file", overlay]
-            if DEBUG:
-                overlay_cmd.append("--debug")
-            run_script(overlay_cmd, "7.custom_openwrt")
-            steps_done.append("7.custom_openwrt")
+            for attempt in range(1, 4):
+                try:
+                    overlay_cmd = [sys.executable,
+                                   os.path.join(SCRIPT_DIR, "7.custom_openwrt.py"),
+                                   "--ip", "192.168.1.1",
+                                   "--file", overlay]
+                    if DEBUG:
+                        overlay_cmd.append("--debug")
+                    run_script(overlay_cmd, f"7.custom_openwrt (attempt {attempt})")
+                    steps_done.append("7.custom_openwrt")
+                    break
+                except RuntimeError as e:
+                    if attempt < 3:
+                        log(f"Overlay 失败，重试 ({attempt}/3): {e}")
+                        time.sleep(10)
+                    else:
+                        log(f"Overlay 最终失败: {e}", level="WARN")
 
     except RuntimeError as e:
         failed_step = steps_done[-1] if steps_done else "pre_check"
