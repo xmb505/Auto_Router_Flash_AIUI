@@ -43,3 +43,10 @@ old_coding/
 **/nand_ubi.img
 # mtd12 已成过去式
 *mtd12*
+
+# ===== 固件文件（太大，不入仓）=====
+*.bin
+*.ubi
+*.itb
+*.tar.gz
+*.fip
