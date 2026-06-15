@@ -525,6 +525,12 @@ def main() -> int:
             )
             steps_done.append("openwrt_online")
             steps_done.append("7.sysupgrade_final")
+            # 验证 reboot 触发成功: 等 192.168.1.1 离线下线
+            log(f"sysupgrade 已触发, 等待 {openwrt_ip} 离线确认刷写完成...")
+            if wait_ping_down(openwrt_ip, 60):
+                log(f"{openwrt_ip} 已离线, 刷写完成!")
+            else:
+                log(f"{openwrt_ip} 60s 内未离线 (可能同 IP 启动), 继续")
         else:
             log(f"sysupgrade 固件未配置或不存在 ({sysupgrade}), 跳过 openwrt 阶段")
             log("路由器在 initramfs 中, 可手动 sysupgrade")
