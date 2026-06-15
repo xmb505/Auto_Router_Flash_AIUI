@@ -109,14 +109,59 @@ def main() -> int:
             raise RuntimeError(f"uboot 上传失败: {resp[:300]}")
         else:
             log(f"uboot 响应 (未识别关键字): {resp[:200]}")
-
-        log("initramfs 已上传到 uboot, uboot 正在写入 flash...")
         steps_done = ["uboot_upload"]
 
-        # 等 uboot 写完 + 重启 (~15-30s)
-        log("等待 uboot 写入完成 (30s)...")
-        time.sleep(30)
-        steps_done.append("uboot_write_wait")
+        # ========== 阶段 2: 轮询 status.html 等刷写完成 ==========
+        log("轮询 status.html 监控 flash 写入进度...")
+        status_url = f"http://{args.ip}/status.html"
+        flash_ok = False
+        poll_start = time.time()
+        poll_timeout = 120
+        while time.time() - poll_start < poll_timeout:
+            result = subprocess.run(
+                ["curl", "-s", "--http0.9", status_url],
+                capture_output=True, text=True, timeout=10,
+            )
+            raw = result.stdout.strip()
+            if raw:
+                # status.html 返回自定义格式: {status:"writting",progress:"55"}
+                # 无引号的 key, 手动解析
+                status = ""
+                progress = ""
+                for part in raw.strip("{}").split(","):
+                    part = part.strip()
+                    if ":" not in part:
+                        continue
+                    key, val = part.split(":", 1)
+                    key = key.strip().strip('"')
+                    val = val.strip().strip('"')
+                    if key == "status":
+                        status = val
+                    elif key == "progress":
+                        progress = val
+                if progress:
+                    log(f"  flash 进度: {progress}%")
+                if status == "done":
+                    log("flash 写入完成!")
+                    flash_ok = True
+                    break
+                if status == "error":
+                    raise RuntimeError(f"pb-boot 刷写失败 (status=error)")
+            time.sleep(2)
+        if not flash_ok:
+            raise RuntimeError(f"pb-boot 刷写超时 ({poll_timeout}s)")
+        steps_done.append("flash_done")
+
+        # ========== 阶段 3: 触发 reboot ==========
+        log("GET /reboot.cgi 触发重启...")
+        subprocess.run(
+            ["curl", "-s", "--http0.9", "-o", "/dev/null",
+             f"http://{args.ip}/reboot.cgi"],
+            timeout=10,
+        )
+        steps_done.append("uboot_reboot")
+
+        log("pb-boot 重启中, 等待 initramfs OpenWrt 上线...")
 
         # ========== 阶段 2: 调用 initramfs_2_standard.py ==========
         if sysupgrade:
