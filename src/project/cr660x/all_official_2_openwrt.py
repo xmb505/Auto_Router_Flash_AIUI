@@ -380,13 +380,8 @@ def main() -> int:
 
         # ============ 阶段 4: 双路 SSH 启用 ============
         log("=== 阶段 4: 启用 SSH ===")
-        if variant == "unicom":
-            info = fetch_init_info(ip)
-            sn = info.get("id", "")
-            ssh_pwd = calc_unicom_root_password(sn)
-            log(f"联通版 SSH 密码已计算 (SN={sn})")
-        else:
-            ssh_pwd = pwd
+        # SSH 启用后密码固定为 root (extendwifi token 里已 passwd root)
+        ssh_pwd = "root"
         log(f"SSH 密码: {ssh_pwd}")
 
         ssh_ok = False
