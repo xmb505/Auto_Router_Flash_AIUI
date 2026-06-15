@@ -91,19 +91,24 @@ def main() -> int:
 
     try:
         # ========== 阶段 1: POST initramfs 到 uboot ==========
-        log(f"POST {initramfs} → http://{args.ip}/upload.cgi ...")
+        log(f"POST {initramfs} → http://{args.ip}/upload.cgi (HTTP/0.9)...")
         curl_cmd = [
-            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            "curl", "-s", "--http0.9",
             "-X", "POST",
             "-F", f"firmware=@{initramfs}",
             f"http://{args.ip}/upload.cgi",
         ]
-        log(f"curl: {' '.join(curl_cmd)}")
-        result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=60)
-        http_code = result.stdout.strip()
-        log(f"curl 返回 HTTP {http_code}")
-        if http_code not in ("200", "302"):
-            raise RuntimeError(f"uboot upload.cgi 返回 HTTP {http_code}: {result.stderr[:200]}")
+        log(f"curl: POST {os.path.basename(initramfs)} → /upload.cgi")
+        result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=120)
+        resp = result.stdout.strip()
+        if not resp:
+            raise RuntimeError(f"uboot upload.cgi 空响应 (stderr: {result.stderr[:200]})")
+        if "上传成功" in resp or "Upload Successful" in resp:
+            log("pb-boot 接收固件成功, 开始写入 flash...")
+        elif "error" in resp.lower() or "失败" in resp:
+            raise RuntimeError(f"uboot 上传失败: {resp[:300]}")
+        else:
+            log(f"uboot 响应 (未识别关键字): {resp[:200]}")
 
         log("initramfs 已上传到 uboot, uboot 正在写入 flash...")
         steps_done = ["uboot_upload"]
