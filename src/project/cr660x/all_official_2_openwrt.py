@@ -502,30 +502,22 @@ def main() -> int:
         else:
             log(f"initramfs 未配置或不存在 ({initramfs}), 跳过")
 
-        # ============ 阶段 7: 等 OpenWrt ============
-        log(f"=== 阶段 7: 等待 OpenWrt ({openwrt_ip}) ===")
-        log("路由器正在重启进 initramfs OpenWrt...")
-        time.sleep(10)
-        if not wait_ping_up(openwrt_ip, OPENWRT_WAIT_TIMEOUT):
-            raise RuntimeError(f"OpenWrt ({openwrt_ip}) 未在预期时间内上线")
-        if not wait_port_open(openwrt_ip, 22, 60):
-            raise RuntimeError("OpenWrt SSH 端口 22 未开放")
-        steps_done.append("openwrt_online")
-
-        # ============ 阶段 8: 烧正式固件 ============
-        log("=== 阶段 8: scp + sysupgrade 正式固件 ===")
+        # ============ 阶段 7: 等 OpenWrt + 烧正式固件 ============
+        log("=== 阶段 7: 调用 initramfs_2_standard.py (等 OpenWrt → sysupgrade) ===")
         if sysupgrade and os.path.isfile(sysupgrade):
-            run_script(
+            data = run_script(
                 [sys.executable,
-                 os.path.join(SCRIPT_DIR, "7.firmware_upload_on_openwrt.py"),
+                 os.path.join(SCRIPT_DIR, "initramfs_2_standard.py"),
                  "--ip", openwrt_ip,
                  "--ssh-pwd", ssh_pwd,
                  "--file", sysupgrade],
-                "7.firmware_upload_on_openwrt"
+                "initramfs_2_standard"
             )
+            steps_done.append("openwrt_online")
             steps_done.append("7.sysupgrade_final")
         else:
-            log(f"sysupgrade 固件未配置或不存在 ({sysupgrade}), 跳过")
+            log(f"sysupgrade 固件未配置或不存在 ({sysupgrade}), 跳过 openwrt 阶段")
+            log("路由器在 initramfs 中, 可手动 sysupgrade")
 
         total_sec = round(time.time() - total_start, 1)
         emit_ok({
