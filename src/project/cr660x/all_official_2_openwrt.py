@@ -505,7 +505,15 @@ def main() -> int:
             log(f"initramfs 未配置或不存在 ({initramfs}), 跳过")
 
         # ============ 阶段 7: 等 OpenWrt + 烧正式固件 ============
-        log("=== 阶段 7: 调用 initramfs_2_standard.py (等 OpenWrt → sysupgrade) ===")
+        log("=== 阶段 7: 等路由器重启进 initramfs OpenWrt ===")
+        # 先等旧 IP 离线（sysupgrade 触发重启）
+        log(f"等待旧 IP {ip} 离线...")
+        if wait_ping_down(ip, 30):
+            log("旧 IP 已离线, 等待新 IP 上线...")
+        else:
+            log("旧 IP 未离线 (可能是同网段), 直接等新 IP...")
+
+        log(f"调用 initramfs_2_standard.py (等 {openwrt_ip} → sysupgrade) ===")
         if sysupgrade and os.path.isfile(sysupgrade):
             data = run_script(
                 [sys.executable,
