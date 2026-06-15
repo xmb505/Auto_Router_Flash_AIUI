@@ -250,13 +250,20 @@ def main() -> int:
     p.add_argument("--ip", default="",
                    help="路由器 IP (不传则自动扫描)")
     p.add_argument("--extendwifi-ssid", default="",
-                   help=f"HAKU 容器 SSID (默认读 INI)")
+                   help=f"HAKU 容器 SSID (覆盖 INI; 默认: 生产=socket.gethostname(), 调试=INI 配置)")
     p.add_argument("--debug", action="store_true")
     args = p.parse_args()
     DEBUG = args.debug
 
     cfg = read_config(args.config)
-    extendwifi_ssid = args.extendwifi_ssid or cfg.get("ssh.extendwifi_ssid", "HAKU-17")
+    if args.extendwifi_ssid:
+        extendwifi_ssid = args.extendwifi_ssid
+    else:
+        ssid_debug = cfg.get("ssh.ssid_debug", "false").strip().lower() in ("true", "1", "yes")
+        if ssid_debug:
+            extendwifi_ssid = cfg.get("ssh.extendwifi_ssid", "HAKU-17")
+        else:
+            extendwifi_ssid = socket.gethostname()
     openwrt_ip = cfg.get("network.openwrt_ip", "192.168.1.1").strip()
     reboot_wait = int(cfg.get("network.reboot_wait", "120"))
     ssh_wait_timeout = int(cfg.get("ssh.ssh_wait_timeout", "90"))
