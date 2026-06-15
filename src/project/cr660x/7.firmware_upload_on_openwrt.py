@@ -45,12 +45,27 @@ def emit_err(error: str, reason: str = "", recoverable: bool = True) -> None:
     print(json.dumps(out, ensure_ascii=False))
 
 
+# ============ 异常类 (Fix #8 失败原因分类) ============
+class ScpUploadError(RuntimeError):
+    """scp 上传执行失败 (非参数错误)。main() 映射 reason='ssh_failed'。"""
+
+
+class SshConnectionError(RuntimeError):
+    """SSH 连接层错误: 超时/拒绝/路由不可达/认证失败。
+    main() 映射 reason='ssh_failed'。"""
+
+
+class SysupgradeRejected(RuntimeError):
+    """sysupgrade 命令被路由器拒绝 (链路通, 但命令级失败)。
+    main() 映射 reason='firmware_rejected'。"""
+
+
 # ============ SCP 上传 ============
 def scp_upload(local_path: str, remote_name: str, ip: str, ssh_pwd: str,
                timeout: int) -> str:
     """scp 上传到 /tmp/<remote_name>，返回 remote_path。"""
     if not os.path.isfile(local_path):
-        raise RuntimeError(f"文件不存在: {local_path}")
+        raise FileNotFoundError(f"本地文件不存在: {local_path}")
 
     remote_path = f"/tmp/{remote_name}"
     log(f"scp {local_path} → root@{ip}:{remote_path}")
@@ -67,41 +82,80 @@ def scp_upload(local_path: str, remote_name: str, ip: str, ssh_pwd: str,
     )
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "").strip()[:300]
-        raise RuntimeError(f"scp 上传失败 (exit={result.returncode}): {err}")
+        raise ScpUploadError(f"scp 上传失败 (exit={result.returncode}): {err}")
 
     log(f"上传完成: {remote_path}")
     return remote_path
 
 
 # ============ SSH sysupgrade ============
+# SSH 协议错误关键字 (用于从 SSH 命令输出里识别连接层错误, 区分于 sysupgrade 命令错误)
+_SSH_ERROR_MARKERS = (
+    "connection refused",
+    "no route to host",
+    "connection reset",
+    "permission denied (publickey",
+    "host key verification failed",
+    "could not resolve hostname",
+    "operation timed out",
+)
+
+
 def ssh_sysupgrade(ip: str, ssh_pwd: str, remote_path: str, timeout: int) -> None:
-    """SSH 进路由器跑 sysupgrade -F，连接被远端关闭视为成功。"""
+    """SSH 进路由器跑 sysupgrade -F，连接被远端关闭视为成功。
+
+    成功信号识别 (顺序):
+      1. "commencing upgrade" in (out+err).lower()  → 显式成功消息
+      2. exit code 255/246 + "closed by remote host" in err → sysupgrade 触发 reboot
+    失败分类 (按顺序):
+      3. SSH 协议错误关键字 in err.lower()  → SshConnectionError (→ reason ssh_failed)
+      4. 兜底 → SysupgradeRejected (→ reason firmware_rejected)
+    """
     cmd = f"sysupgrade -F {remote_path}"
     log(f"SSH root@{ip} {cmd}")
 
-    result = subprocess.run(
-        [
-            "sshpass", "-p", ssh_pwd, "ssh",
-            "-oStrictHostKeyChecking=no",
-            "-oUserKnownHostsFile=/dev/null",
-            "-oLogLevel=ERROR",
-            f"root@{ip}", cmd,
-        ],
-        capture_output=True, text=True, timeout=timeout,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "sshpass", "-p", ssh_pwd, "ssh",
+                "-oStrictHostKeyChecking=no",
+                "-oUserKnownHostsFile=/dev/null",
+                "-oLogLevel=ERROR",
+                f"root@{ip}", cmd,
+            ],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise SshConnectionError(f"SSH 连接超时 (>{timeout}s): {e}") from e
 
     out = result.stdout.strip()
     err = result.stderr.strip()
+    combined_lower = (out + "\n" + err).lower()
+    err_lower = err.lower()
 
-    # sysupgrade -F 成功后路由器 reboot → 远端关闭连接 → ssh exit ≠ 0 (246)
-    # "Commencing upgrade" 是唯一可信的成功标志（路由器开始升级流程后会关 SSH）
-    # "Connection ... closed" 报文在 sshpass 侧可能被过滤，不依赖它
-    if "Commencing upgrade" in out or "Commencing upgrade" in err:
-        log("sysupgrade 已触发，路由器正在重启进正式 OpenWrt")
+    # 1. 显式成功消息
+    if "commencing upgrade" in combined_lower:
+        log("sysupgrade 已触发 (commencing upgrade 信号)，路由器正在重启进正式 OpenWrt")
         return
 
-    raise RuntimeError(
-        f"sysupgrade 失败 (exit={result.returncode}): {out} {err}".strip()
+    # 2. 远端关闭 SSH (sysupgrade 触发 reboot 的预期表现)
+    # exit 255 = OpenSSH 通用, 246 = sshpass 远端关闭
+    if result.returncode in (255, 246) and "closed by remote host" in err_lower:
+        log("sysupgrade 已触发 (远端关闭 SSH)，路由器正在重启进正式 OpenWrt")
+        return
+
+    # 3. SSH 协议错误
+    for marker in _SSH_ERROR_MARKERS:
+        if marker in err_lower:
+            raise SshConnectionError(
+                f"SSH 连接失败 (exit={result.returncode}, marker={marker!r}): "
+                f"{err[:200]}"
+            )
+
+    # 4. 兜底: sysupgrade 命令被路由器拒绝
+    raise SysupgradeRejected(
+        f"sysupgrade 拒绝固件 (exit={result.returncode}): "
+        f"stdout={out[:200]!r} stderr={err[:200]!r}"
     )
 
 
@@ -169,14 +223,22 @@ def main() -> int:
 
     try:
         remote = scp_upload(args.file, target, args.ip, args.ssh_pwd, args.timeout)
-    except Exception as e:
+    except FileNotFoundError as e:
         log(str(e), level="ERROR")
         emit_err(str(e), reason="file_not_found", recoverable=True)
+        return 1
+    except ScpUploadError as e:
+        log(str(e), level="ERROR")
+        emit_err(str(e), reason="ssh_failed", recoverable=True)
         return 1
 
     try:
         ssh_sysupgrade(args.ip, args.ssh_pwd, remote, args.timeout)
-    except Exception as e:
+    except SshConnectionError as e:
+        log(str(e), level="ERROR")
+        emit_err(str(e), reason="ssh_failed", recoverable=True)
+        return 1
+    except SysupgradeRejected as e:
         log(str(e), level="ERROR")
         emit_err(str(e), reason="firmware_rejected", recoverable=True)
         return 1

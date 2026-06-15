@@ -6,6 +6,12 @@
 # 后置:    pb-boot 写入 mtd0（PandoraBox 第三方 uboot），**不重启**
 # 来源:    实机验证 — mtd unlock /dev/mtd0 && mtd write /tmp/pb-boot.img /dev/mtd0
 #
+# ⚠️ --file 含义特殊: 值 = 路由器 /tmp/ 下的 basename (非本地路径)
+#     区别于 4.firmware_upload_on_miwifi.sh --file (本地路径)
+#     流水线用法: 4.--file <本地路径> 先上传, 再 5.--file <basename>
+#     合法: pb-boot.bin / initramfs-kernel.bin
+#     非法: /tmp/pb-boot.bin / subdir/pb-boot.bin / pb boot.bin (空格)
+#
 # 输出:    stdout = 单个 JSON {"ok": bool, "step": ..., "data"|"error":..., "reason"?}
 #          stderr = 默认空白，--debug 时打印进度
 #          exit  = 0 成功 / 1 失败
@@ -14,6 +20,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -69,19 +76,19 @@ def miwifi_ssh_cmd(ip: str, ssh_pwd: str, command: str, timeout: int) -> dict:
 def uboot_write(ip: str, ssh_pwd: str, remote_file: str, timeout: int) -> dict:
     target_path = f"/tmp/{remote_file}"
 
-    # 1. 解锁 mtd0
-    log("解锁 /dev/mtd0...")
-    unlock = miwifi_ssh_cmd(ip, ssh_pwd, "mtd unlock /dev/mtd0", timeout)
-    if not unlock.get("ok"):
-        raise RuntimeError(f"mtd unlock 失败: {unlock.get('stderr', unlock.get('stdout', ''))}")
-
-    # 2. 写 pb-boot
-    log(f"mtd write {target_path} → /dev/mtd0 ...")
-    write = miwifi_ssh_cmd(ip, ssh_pwd, f"mtd write {target_path} /dev/mtd0", timeout)
-    if not write.get("ok"):
-        raise RuntimeError(f"mtd write 失败: {write.get('stderr', write.get('stdout', ''))}")
-    stdout = write.get("stdout", "")
-    if "Writing from" not in stdout and "Writing from" not in write.get("stderr", ""):
+    # 原子执行: unlock && write 走单条链式命令, 单次 SSH 会话
+    # shell && 短路保证: unlock 失败 → write 不执行 → mtd0 保持原状 (locked)
+    # 边界: 本优化仅保证会话内顺序原子, mtd write 写 flash 过程中断电仍可能留下
+    # 半写 mtd0 (会话内原子 ≠ 硬件原子), 需外部备份 + breed/编程器恢复
+    chain = f"mtd unlock /dev/mtd0 && mtd write {target_path} /dev/mtd0"
+    log(f"原子执行: {chain}")
+    result = miwifi_ssh_cmd(ip, ssh_pwd, chain, timeout)
+    if not result.get("ok"):
+        raise RuntimeError(
+            f"mtd unlock+write 失败: {result.get('stderr', result.get('stdout', ''))}"
+        )
+    stdout = result.get("stdout", "")
+    if "Writing from" not in stdout and "Writing from" not in result.get("stderr", ""):
         raise RuntimeError(f"mtd write 输出异常: {stdout}")
 
     log("pb-boot 已写入 mtd0（未重启）")
@@ -94,6 +101,22 @@ def uboot_write(ip: str, ssh_pwd: str, remote_file: str, timeout: int) -> dict:
 
 
 # ============ CLI ============
+def _validate_basename(value: str) -> str:
+    """--file 必须是文件 basename, 不含路径分隔符或 shell 元字符。
+
+    argparse 拦截后: 自动 exit 2 + 错误信息到 stderr, 不 emit JSON, 不进 main()。
+    两层防御:
+      - required=True 拦截参数缺失
+      - type= 拦截空串/非法值
+    """
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", value):
+        raise argparse.ArgumentTypeError(
+            f"--file 必须是 basename (如 'pb-boot.bin'), "
+            f"不含 / \\ 或特殊字符, 收到: {value!r}"
+        )
+    return value
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="CR660X 步骤 5：SSH 进 miwifi，mtd write pb-boot 到 Bootloader（不重启）",
@@ -106,8 +129,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--ip", default=DEFAULT_ROUTER_IP,
                    help=f"路由器 IP（默认: {DEFAULT_ROUTER_IP}）")
-    p.add_argument("--file", required=True,
-                   help="路由器 /tmp/ 下的文件名（由 4.firmware_upload_on_miwifi.sh 上传）")
+    p.add_argument("--file", required=True, type=_validate_basename,
+                   help="路由器 /tmp/ 下的文件名 (basename, 非本地路径, 例: pb-boot.img)")
     p.add_argument("--ssh-pwd", default="root",
                    help="SSH root 密码（默认: root）")
     p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
