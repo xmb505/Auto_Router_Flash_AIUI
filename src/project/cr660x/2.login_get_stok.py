@@ -174,15 +174,20 @@ def login_get_stok(router_ip: str, pwd: str, variant_arg: str,
     log(f"KEY={key[:8]}…")
 
     # 2. 探测 init_info（拿 inited + device_id + 判 variant）
-    info = http_get(f"{base_url}/cgi-bin/luci/api/xqsystem/init_info", timeout)
-    if is_factory_state(info):
+    info = {}
+    try:
+        info = http_get(f"{base_url}/cgi-bin/luci/api/xqsystem/init_info", timeout)
+    except Exception as e:
+        log(f"init_info 不可用 ({e})，跳过，按默认值处理")
+
+    if info.get("inited") == 0:
         raise RuntimeError(
             f"路由器出厂未初始化 (inited=0)，请先跑 1.official_init.py"
         )
-    log(f"inited={info.get('inited')} model={info.get('model')}")
+    log(f"inited={info.get('inited', '?')} model={info.get('model', '?')}")
 
     device_id = info.get("id", "")
-    detected_variant = detect_variant(info)
+    detected_variant = detect_variant(info) if info else "move"
     variant = variant_arg if variant_arg != "auto" else detected_variant
 
     # 3. 登录
