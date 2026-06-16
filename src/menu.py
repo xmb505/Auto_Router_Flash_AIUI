@@ -175,44 +175,52 @@ def xiaomi_flash():
     run_with_debug(cmd, model_dir, f"{model_label} → OpenWrt")
 
 
-# ============ CR660X 刷机 ============
+# ============ CR660X 子菜单 ============
 
-def cr660x_flash():
-    """CR660X 系列专用刷机"""
+def cr660x_menu():
+    """CR660X 二级子菜单"""
     cr660x_dir = os.path.join(PROJECT_DIR, "cr660x")
-    script = os.path.join(cr660x_dir, "all_official_2_openwrt.py")
-
-    if not os.path.isfile(script):
-        print("❌ 找不到 all_official_2_openwrt.py")
-        pause()
-        return
-
-    clear_screen()
-    print("=" * 40)
-    print("      CR660X 系列刷机")
-    print("=" * 40)
-    print()
-    print("  适用机型: CR6606(联通) / CR6608(移动) / CR6609(电信)")
-    print("           TR606 / TR608 / TR609")
-    print()
-    print("  流程: 自动扫描 IP → 识别运营商 → 开 SSH")
-    print("        (extendwifi + HAKU 容器) → 刷 pb-boot → OpenWrt")
-    print()
-    print("  前置: HAKU-XX 容器已运行最新 expolit.py")
-    print()
-
-    try:
-        choice = input("  开始刷机？(Y/n): ").strip().lower()
-        if choice == "n":
-            print("已取消")
-            pause()
-            return
-    except (EOFError, KeyboardInterrupt):
+    while True:
+        clear_screen()
+        print("=" * 40)
+        print("      CR660X 系列刷机")
+        print("=" * 40)
         print()
-        return
+        print("  1. 官方固件 → OpenWrt（全自动全流程）")
+        print("  2. Pb-boot → OpenWrt（已刷 pb-boot，192.168.1.1 在线）")
+        print()
+        print("  0. 返回上级菜单")
+        print()
 
-    cmd = [sys.executable, script, "--debug"]
-    run_with_debug(cmd, cr660x_dir, "CR660X → OpenWrt")
+        try:
+            choice = input("  请选择 [0-2]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if choice == "0":
+            break
+        elif choice == "1":
+            script = os.path.join(cr660x_dir, "all_official_2_openwrt.py")
+            if os.path.isfile(script):
+                cmd = [sys.executable, script, "--debug"]
+                run_with_debug(cmd, cr660x_dir, "CR660X 官方 → OpenWrt")
+            else:
+                print("❌ 找不到 all_official_2_openwrt.py")
+                pause()
+        elif choice == "2":
+            script = os.path.join(cr660x_dir, "pandora_2_openwrt.py")
+            if os.path.isfile(script):
+                cmd = [sys.executable, script, "--debug",
+                       "--initramfs", "files/initramfs-kernel.bin",
+                       "--sysupgrade", "files/sharewifi_1.0.7.bin"]
+                run_with_debug(cmd, cr660x_dir, "CR660X Pb-boot → OpenWrt")
+            else:
+                print("❌ 找不到 pandora_2_openwrt.py")
+                pause()
+        else:
+            print("无效选项")
+            time.sleep(1)
 
 
 # ============ 新路由子菜单 ============
@@ -289,7 +297,7 @@ def main_menu():
         elif choice == "2":
             xiaomi_flash()
         elif choice == "3":
-            cr660x_flash()
+            cr660x_menu()
         else:
             print("无效选项")
             time.sleep(1)
