@@ -321,7 +321,9 @@ def main() -> int:
             # init_info 不可用或未知 model → 让工人选
             if not variant:
                 worker_msg("无法自动识别运营商版本")
-                v = input("请选择运营商 (1=联通/移动电信, 默认移动电信): ").strip()
+                print("  1) 联通 (CR6606 / TR606)")
+                print("  2) 移动/电信 (CR6608 / CR6609 / TR608 / TR609)")
+                v = input("请选择 [1/2], 默认 2: ").strip()
                 variant = "unicom" if v == "1" else "move"
                 if inited is None:
                     worker_msg("是否已初始化 (inited=0/1, 默认 0=工厂态)?")
