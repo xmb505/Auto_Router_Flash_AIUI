@@ -59,6 +59,16 @@ def wait_ping_up(ip: str, timeout: int = 120) -> bool:
     return False
 
 
+def wait_ping_down(ip: str, timeout: int = 60) -> bool:
+    log(f"等待 {ip} 离线 (timeout={timeout}s)...")
+    for i in range(timeout):
+        if not ping_host(ip, 1):
+            log(f"{ip} 已离线 (≈{i}s)")
+            return True
+        time.sleep(1)
+    return False
+
+
 def wait_port_open(ip: str, port: int, timeout: int = 60) -> bool:
     start = time.time()
     while time.time() - start < timeout:
@@ -134,6 +144,13 @@ def main() -> int:
              "--ip", ip, "--ssh-pwd", args.ssh_pwd, "--file", file_path],
             "7.firmware_upload_on_openwrt"
         )
+        # 4. 验证 reboot 触发: 等 IP 离线
+        log(f"sysupgrade 触发, 等待 {ip} 离线确认刷写完成...")
+        if wait_ping_down(ip, 60):
+            log(f"{ip} 已离线, 刷写完成!")
+        else:
+            log(f"{ip} 60s 内未离线 (可能同 IP 启动), 继续")
+
         emit_ok({
             "ip": ip,
             "local_file": file_path,
