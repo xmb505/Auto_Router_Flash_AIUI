@@ -10,6 +10,7 @@
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -37,6 +38,29 @@ def emit_err(error: str, reason: str = "", recoverable: bool = True) -> None:
         out["reason"] = reason
     print(json.dumps(out, ensure_ascii=False))
 
+
+# ============ 网络等待工具 ============
+
+def ping_host(ip: str, timeout: int = 2) -> bool:
+    try:
+        subprocess.run(["ping", "-c", "1", "-W", str(timeout), ip],
+                       capture_output=True, timeout=timeout + 2, check=True)
+        return True
+    except Exception:
+        return False
+
+
+def wait_ping_up(ip: str, timeout: int = 120) -> bool:
+    start = time.time()
+    while time.time() - start < timeout:
+        if ping_host(ip, 2):
+            log(f"{ip} ping 通 (≈{round(time.time()-start,1)}s)")
+            return True
+        time.sleep(2)
+    return False
+
+
+# ============ 脚本调用 ============
 
 def run_script(cmd: list, label: str) -> dict:
     log(f"[{label}] {' '.join(cmd)}")
@@ -161,9 +185,12 @@ def main() -> int:
         )
         steps_done.append("uboot_reboot")
 
-        log("pb-boot 重启中, 等待 initramfs OpenWrt 上线...")
+        log(f"pb-boot 重启中, 等待 {args.ip} 上线...")
         time.sleep(15)
-        log("pb-boot 重启, 调用 initramfs_2_standard.py...")
+        log(f"ping {args.ip} 检测 initramfs OpenWrt...")
+        if not wait_ping_up(args.ip, 120):
+            raise RuntimeError(f"{args.ip} 在 120s 内未 ping 通")
+        log(f"{args.ip} 已上线, 调用 initramfs_2_standard.py...")
 
         # ========== 阶段 2: 调用 initramfs_2_standard.py ==========
         if sysupgrade:
