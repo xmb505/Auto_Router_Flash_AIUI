@@ -38,13 +38,19 @@ def emit_err(error, reason=""):
 
 
 def http_get(url, timeout):
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        raise RuntimeError(f"HTTP GET 失败: {e}") from e
 
 
 def http_get_raw(url, timeout):
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return r.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return r.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        raise RuntimeError(f"HTTP GET 失败: {e}") from e
 
 
 def call_extendwifi_connect(stok, ip, ssid, password, timeout):
