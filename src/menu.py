@@ -175,6 +175,46 @@ def xiaomi_flash():
     run_with_debug(cmd, model_dir, f"{model_label} → OpenWrt")
 
 
+# ============ CR660X 刷机 ============
+
+def cr660x_flash():
+    """CR660X 系列专用刷机"""
+    cr660x_dir = os.path.join(PROJECT_DIR, "cr660x")
+    script = os.path.join(cr660x_dir, "all_official_2_openwrt.py")
+
+    if not os.path.isfile(script):
+        print("❌ 找不到 all_official_2_openwrt.py")
+        pause()
+        return
+
+    clear_screen()
+    print("=" * 40)
+    print("      CR660X 系列刷机")
+    print("=" * 40)
+    print()
+    print("  适用机型: CR6606(联通) / CR6608(移动) / CR6609(电信)")
+    print("           TR606 / TR608 / TR609")
+    print()
+    print("  流程: 自动扫描 IP → 识别运营商 → 开 SSH")
+    print("        (extendwifi + HAKU 容器) → 刷 pb-boot → OpenWrt")
+    print()
+    print("  前置: HAKU-XX 容器已运行最新 expolit.py")
+    print()
+
+    try:
+        choice = input("  开始刷机？(Y/n): ").strip().lower()
+        if choice == "n":
+            print("已取消")
+            pause()
+            return
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+
+    cmd = [sys.executable, script, "--debug"]
+    run_with_debug(cmd, cr660x_dir, "CR660X → OpenWrt")
+
+
 # ============ 新路由子菜单 ============
 
 def newifi_menu():
@@ -230,12 +270,13 @@ def main_menu():
         print()
         print("  1. 新路由 (Newifi D2)")
         print("  2. 小米官方版本 (自动检测机型)")
+        print("  3. CR660X 系列 (联通/移动/电信)")
         print()
         print("  0. 退出")
         print()
 
         try:
-            choice = input("  请选择 [0-2]: ").strip()
+            choice = input("  请选择 [0-3]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -247,6 +288,8 @@ def main_menu():
             newifi_menu()
         elif choice == "2":
             xiaomi_flash()
+        elif choice == "3":
+            cr660x_flash()
         else:
             print("无效选项")
             time.sleep(1)
