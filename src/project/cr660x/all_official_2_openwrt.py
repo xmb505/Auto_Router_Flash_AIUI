@@ -298,22 +298,36 @@ def main() -> int:
 
         # ============ 阶段 1: 获取路由器信息 ============
         log("=== 阶段 1: 获取路由器信息 ===")
-        info = fetch_init_info(ip)
-        model = info.get("model", "").lower()
-        hardware = info.get("hardware", "").lower()
-        inited = info.get("inited")
-        romversion = info.get("romversion", "")
-        log(f"model={model} hardware={hardware} inited={inited} ver={romversion}")
+        model = ""
+        variant = ""
+        inited = None
+        romversion = ""
+        try:
+            info = fetch_init_info(ip)
+            model = info.get("model", "").lower()
+            hardware = info.get("hardware", "").lower()
+            inited = info.get("inited")
+            romversion = info.get("romversion", "")
+            log(f"model={model} hardware={hardware} inited={inited} ver={romversion}")
+        except Exception as e:
+            log(f"init_info 不可用: {e} (部分 CR6609 没有此 API)")
+            worker_msg("无法获取路由器信息 (init_info API 不可用)")
 
         if "cr6606" in model:
             variant = "unicom"
         elif "cr6608" in model or "cr6609" in model:
             variant = "move"
         else:
-            # 兜底: 看作 move 流程
-            variant = "move"
-            worker_msg(f"未知 model={model}, 按移动版流程处理")
-
+            # init_info 不可用或未知 model → 让工人选
+            if not variant:
+                worker_msg("无法自动识别运营商版本")
+                v = input("请选择运营商 (1=联通/移动电信, 默认移动电信): ").strip()
+                variant = "unicom" if v == "1" else "move"
+                if inited is None:
+                    worker_msg("是否已初始化 (inited=0/1, 默认 0=工厂态)?")
+                    inp = input("inited (0/1): ").strip()
+                    inited = 1 if inp == "1" else 0
+                worker_msg(f"按 {variant} 版流程, inited={inited}")
         log(f"variant={variant}")
         steps_done.append("variant_detected")
 
