@@ -162,6 +162,8 @@ def main() -> int:
         steps_done.append("uboot_reboot")
 
         log("pb-boot 重启中, 等待 initramfs OpenWrt 上线...")
+        time.sleep(15)
+        log("pb-boot 重启, 调用 initramfs_2_standard.py...")
 
         # ========== 阶段 2: 调用 initramfs_2_standard.py ==========
         if sysupgrade:
