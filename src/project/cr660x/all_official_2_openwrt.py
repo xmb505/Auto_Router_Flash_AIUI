@@ -313,9 +313,9 @@ def main() -> int:
             log(f"init_info 不可用: {e} (部分 CR6609 没有此 API)")
             worker_msg("无法获取路由器信息 (init_info API 不可用)")
 
-        if "cr6606" in model:
+        if "cr6606" in model or "tr606" in model:
             variant = "unicom"
-        elif "cr6608" in model or "cr6609" in model:
+        elif "cr6608" in model or "cr6609" in model or "tr608" in model or "tr609" in model:
             variant = "move"
         else:
             # init_info 不可用或未知 model → 让工人选
