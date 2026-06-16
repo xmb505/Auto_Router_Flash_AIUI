@@ -206,11 +206,11 @@ def run_shell_script(script_name: str, args: list, label: str) -> dict:
 # ============ 交互: 密码输入 (移动/电信) ============
 
 def interact_password() -> str:
-    """交互式获取 8 位贴纸密码, 允许字母数字 ! @ #, 最多 2 次"""
+    """交互式获取 8 位管理密码, 允许字母数字 ! @ #, 最多 2 次"""
     for attempt in range(1, 3):
-        raw = input(f"请输入路由器贴纸上的 8 位无线密码 (第 {attempt}/2 次): ").strip()
+        raw = input(f"请输入路由器贴纸上的 8 位管理密码 (第 {attempt}/2 次): ").strip()
         if not validate_password(raw):
-            print(f"密码必须恰好 8 位, 只允许字母/数字/!@#, 你输了 {len(raw)} 位")
+            print(f"管理密码必须恰好 8 位, 只允许字母/数字/!@#, 你输了 {len(raw)} 位")
             continue
         return raw
     raise RuntimeError("密码输入 2 次均不符合要求")
@@ -325,10 +325,12 @@ def main() -> int:
                 print("  2) 移动/电信 (CR6608 / CR6609 / TR608 / TR609)")
                 v = input("请选择 [1/2], 默认 2: ").strip()
                 variant = "unicom" if v == "1" else "move"
-                if inited is None:
+                if variant == "unicom" and inited is None:
                     worker_msg("是否已初始化 (inited=0/1, 默认 0=工厂态)?")
                     inp = input("inited (0/1): ").strip()
                     inited = 1 if inp == "1" else 0
+                if inited is None:
+                    inited = 1
                 worker_msg(f"按 {variant} 版流程, inited={inited}")
         log(f"variant={variant}")
         steps_done.append("variant_detected")
