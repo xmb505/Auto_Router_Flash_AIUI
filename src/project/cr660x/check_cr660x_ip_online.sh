@@ -1,17 +1,17 @@
 #!/bin/bash
-# check_cr660x_ip_online.sh — 检测 CR660X 三个厂商默认 IP 哪个在线
+# check_cr660x_ip_online.sh — 检测 CR660X 五个厂商默认 IP 哪个在线
 #
 # 用法: ./check_cr660x_ip_online.sh
 #       ./check_cr660x_ip_online.sh --timeout 60
 #       ./check_cr660x_ip_online.sh --debug
 #
 # 默认 timeout: 180 秒（3 分钟）
-# 三个 IP 并行 ping，先响应的就是在线 IP
+# 五个 IP 并行 ping，先响应的就是在线 IP
 #
 # 输出: stdout = 单个 JSON {"ok": true/false, "found_ip": "..."}
 #       exit  = 0 找到 / 1 超时
 
-IPS=("192.168.2.1" "192.168.10.1" "192.168.31.1")
+IPS=("192.168.1.1" "192.168.2.1" "10.11.12.1" "192.168.10.1" "192.168.31.1")
 TIMEOUT=180
 DEBUG=0
 
@@ -62,5 +62,5 @@ if [ -n "$found" ]; then
   exit 0
 fi
 
-printf '{"ok":false,"found_ip":null,"error":"超时 %ds，三个 IP 均无响应"}\n' "$TIMEOUT"
+printf '{"ok":false,"found_ip":null,"error":"超时 %ds，五个 IP 均无响应"}\n' "$TIMEOUT"
 exit 1
