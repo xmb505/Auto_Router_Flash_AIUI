@@ -152,8 +152,8 @@ def calc_unicom_root_password(sn: str) -> str:
 
 
 def validate_password(pwd: str) -> bool:
-    """密码 8 位, 允许字母数字 ! @ #"""
-    return bool(re.fullmatch(r"[A-Za-z0-9!@#]{8}", pwd))
+    """密码 8 位, 允许字母数字 ! @ # %"""
+    return bool(re.fullmatch(r"[A-Za-z0-9!@#%]{8}", pwd))
 
 
 # ============ subprocess 调用 ============
