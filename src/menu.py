@@ -12,6 +12,7 @@
 #   3) CR660X 系列 (联通/移动/电信)
 #      └─ 实时 IP 探测 + 全流程 / pb-boot 子菜单
 
+import configparser
 import json
 import os
 import select
@@ -314,9 +315,15 @@ def cr660x_menu():
         elif choice == "2":
             script = os.path.join(cr660x_dir, "pandora_2_openwrt.py")
             if os.path.isfile(script):
+                ini_path = os.path.join(cr660x_dir, "all_official_2_openwrt.ini")
+                cfg = configparser.ConfigParser()
+                cfg.read(ini_path)
+                initramfs = cfg.get("firmware", "initramfs_file", fallback="files/initramfs-kernel.bin")
+                sysupgrade = cfg.get("firmware", "sysupgrade_file", fallback="")
                 cmd = [sys.executable, script, "--debug",
-                       "--initramfs", "files/initramfs-kernel.bin",
-                       "--sysupgrade", "files/sharewifi_1.0.7.bin"]
+                       "--initramfs", os.path.join(cr660x_dir, initramfs)]
+                if sysupgrade:
+                    cmd.extend(["--sysupgrade", os.path.join(cr660x_dir, sysupgrade)])
                 run_with_debug(cmd, cr660x_dir, "CR660X Pb-boot → OpenWrt")
             else:
                 print("❌ 找不到 pandora_2_openwrt.py")
